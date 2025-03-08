@@ -8,6 +8,9 @@ on:
 jobs:
     build:
         runs-on: ubuntu-latest
+        permissions:
+            contents: write # Required for GitHub Pages deployment
+
         steps:
             - uses: actions/checkout@v4
 
@@ -19,7 +22,16 @@ jobs:
             - name: Install dependencies
               run: |
                   python -m pip install --upgrade pip
-                  pip install sphinx sphinx-rtd-theme
+                  # Install all documentation dependencies explicitly
+                  pip install sphinx sphinx-rtd-theme sphinx-autodoc-typehints nbsphinx
+
+                  # If you have a requirements file, also install it
+                  if [ -f requirements.txt ]; then
+                    pip install -r requirements.txt
+                  fi
+
+                  # Display installed packages for debugging
+                  pip freeze
 
             - name: Create documentation structure
               run: |
@@ -30,8 +42,11 @@ jobs:
                     echo 'project = "VERUS"' > docs/source/conf.py
                     echo 'copyright = "2025, VERUS Team"' >> docs/source/conf.py
                     echo 'author = "VERUS Team"' >> docs/source/conf.py
-                    echo 'extensions = ["sphinx.ext.autodoc"]' >> docs/source/conf.py
+                    echo 'extensions = ["sphinx.ext.autodoc", "sphinx.ext.viewcode", "sphinx_rtd_theme"]' >> docs/source/conf.py
                     echo 'html_theme = "sphinx_rtd_theme"' >> docs/source/conf.py
+                  else
+                    # Modify existing conf.py to remove problematic extension
+                    sed -i '/sphinx_autodoc_typehints/d' docs/source/conf.py
                   fi
 
                   # Create minimal index.rst if it doesn't exist
@@ -41,6 +56,15 @@ jobs:
                     echo '' >> docs/source/index.rst
                     echo 'Welcome to VERUS documentation.' >> docs/source/index.rst
                   fi
+
+            - name: Debug documentation files
+              run: |
+                  echo "Contents of docs directory:"
+                  ls -la docs/
+                  echo "Contents of docs/source directory:"
+                  ls -la docs/source/
+                  echo "Content of conf.py:"
+                  cat docs/source/conf.py
 
             - name: Build documentation
               run: |
@@ -54,7 +78,6 @@ jobs:
                   path: docs/build/html
 
             - name: Deploy to GitHub Pages
-              uses: peaceiris/actions-gh-pages@v4
+              uses: JamesIves/github-pages-deploy-action@v4
               with:
-                  github_token: ${{ secrets.GITHUB_TOKEN }}
-                  publish_dir: ./docs/build/html
+                  folder: docs/build/html
