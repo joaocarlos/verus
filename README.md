@@ -1,3 +1,5 @@
+![LES2 Logo](./src/figures/les2banner.png)
+
 # VERUS
 
 _Vulnerability Evaluation for Resilient Urban Systems_
@@ -6,8 +8,8 @@ _Vulnerability Evaluation for Resilient Urban Systems_
 ![Jupyter Notebook](https://img.shields.io/badge/Jupyter-Notebook-orange?style=for-the-badge&logo=jupyter)
 ![OSMnx](https://img.shields.io/badge/OSMnx-1.1.1-blue?style=for-the-badge&logo=openstreetmap)
 ![Folium](https://img.shields.io/badge/Folium-0.12.1-green?style=for-the-badge&logo=folium)
-![Version](https://img.shields.io/badge/version-1.0.0-blue?style=for-the-badge&logo=github)
 [![Documentation](https://img.shields.io/badge/docs-latest-brightgreen?style=for-the-badge)](https://joaocarlos.github.io/verus/)
+![Version](https://img.shields.io/badge/version-1.0.0-blue?style=for-the-badge&logo=github)
 
 ## Description
 
