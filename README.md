@@ -7,8 +7,15 @@ _Vulnerability Evaluation for Resilient Urban Systems_
 ![OSMnx](https://img.shields.io/badge/OSMnx-1.1.1-blue?style=for-the-badge&logo=openstreetmap)
 ![Folium](https://img.shields.io/badge/Folium-0.12.1-green?style=for-the-badge&logo=folium)
 ![Version](https://img.shields.io/badge/version-1.0.0-blue?style=for-the-badge&logo=github)
+[![Documentation](https://img.shields.io/badge/docs-latest-brightgreen?style=for-the-badge)](https://yourusername.github.io/verus/)
 
 ## Description
+
+VERUS (Vulnerability Evaluation for Resilient Urban Systems) is a Python library for extracting points of interest from OpenStreetMap, clustering them based on spatial proximity and time-based vulnerability indices, and analyzing urban vulnerability patterns.
+
+## Documentation
+
+Comprehensive documentation is available at [https://yourusername.github.io/verus/](https://yourusername.github.io/verus/)
 
 ## Publications
 

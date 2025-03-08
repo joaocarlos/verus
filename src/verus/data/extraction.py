@@ -11,6 +11,22 @@ from verus.utils.timer import TimeoutException, with_timeout
 
 
 class DataExtractor(Logger):
+    """
+    Extract and process points of interest (POIs) from OpenStreetMap.
+
+    This class fetches POIs from OpenStreetMap based on specified tags,
+    processes them into a structured format, and saves them as GeoJSON
+    files for further analysis.
+
+    Attributes:
+        region (str): The region name to extract data from.
+        buffer_distance (float): Buffer distance in meters around the region.
+        amenity_tags (dict): Dictionary of OSM tags to extract.
+
+    Examples:
+        >>> extractor = DataExtractor(region="Porto, Portugal")
+        >>> extractor.extract_all_pois()
+    """
 
     def __init__(
         self,
