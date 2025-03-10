@@ -53,7 +53,7 @@ class HexagonGridGenerator(Logger):
             current_dir = os.path.dirname(os.path.abspath(__file__))
             # Go up to project root and then to data subdirectory
             self.base_dir = os.path.abspath(
-                os.path.join(current_dir, "..", "..", "data")
+                os.path.join(current_dir, "..", "data")
             )
 
         self.log(f"Using base directory: {self.base_dir}")

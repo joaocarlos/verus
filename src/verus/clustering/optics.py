@@ -86,7 +86,7 @@ class GeOPTICS(Cluster):
             },
         }
 
-    def load_data(self, data_source, time_windows_path=None, evaluation_time=None):
+    def load(self, data_source, time_windows_path=None, evaluation_time=None):
         """
         Load POI data and optionally time window data.
 
@@ -101,7 +101,7 @@ class GeOPTICS(Cluster):
         """
         try:
             # Use the base class method to load the initial data
-            df = super().load_data(data_source)
+            df = super().load(data_source)
 
             # Basic validation
             required_columns = ["latitude", "longitude", "category"]
@@ -291,9 +291,9 @@ class GeOPTICS(Cluster):
                 self.log("No clusters found after filtering noise points", "warning")
                 return None, None
 
-            # Rename 'cluster' to 'cluster_id' for consistency with the base class
+            # Rename 'cluster' to 'cluster' for consistency with the base class
             cluster_df = pd.DataFrame(
-                cluster_data, columns=["latitude", "longitude", "cluster_id"]
+                cluster_data, columns=["latitude", "longitude", "cluster"]
             )
 
             # Merge with original data to include category, name, and vi
@@ -310,7 +310,7 @@ class GeOPTICS(Cluster):
 
             # Calculate cluster centroids
             centroids = []
-            cluster_ids = []
+            clusters = []
             cluster_sizes = []
 
             for label in unique_clusters:
@@ -319,7 +319,7 @@ class GeOPTICS(Cluster):
                     if len(cluster_points) > 0:
                         centroid = cluster_points.mean(axis=0)
                         centroids.append(centroid)
-                        cluster_ids.append(int(label))
+                        clusters.append(int(label))
                         cluster_sizes.append(len(cluster_points))
 
             if not centroids:
@@ -327,14 +327,14 @@ class GeOPTICS(Cluster):
                 return cluster_df, None
 
             centroids_df = pd.DataFrame(centroids, columns=["latitude", "longitude"])
-            centroids_df["cluster_id"] = cluster_ids
+            centroids_df["cluster"] = clusters
             # Add size for consistency with base class
             centroids_df["size"] = cluster_sizes
-            centroids_df = centroids_df[["cluster_id", "latitude", "longitude", "size"]]
+            centroids_df = centroids_df[["cluster", "latitude", "longitude", "size"]]
 
             # Save results if requested - using the base class method
             if save_output and place_name:
-                self.save_results(
+                self.save(
                     cluster_df, centroids_df, place_name, evaluation_time, "OPTICS"
                 )
 
@@ -390,23 +390,21 @@ class GeOPTICS(Cluster):
 
             # Add cluster points - create a colormap for clusters
             self.log("Adding cluster points to map")
-            num_clusters = len(cluster_df["cluster_id"].unique())
+            num_clusters = len(cluster_df["cluster"].unique())
             colors = linear.viridis.scale(0, max(1, num_clusters - 1))
 
             # Add points by cluster with consistent colors but without clustering
             cluster_groups = {}  # Store feature groups for each cluster
 
             # Create feature groups for each cluster
-            for cluster_id in sorted(cluster_df["cluster_id"].unique()):
+            for cluster in sorted(cluster_df["cluster"].unique()):
                 # Create a feature group for this cluster
-                cluster_groups[cluster_id] = folium.FeatureGroup(
-                    name=f"Cluster {cluster_id}"
-                )
+                cluster_groups[cluster] = folium.FeatureGroup(name=f"Cluster {cluster}")
 
             # Add points to their respective feature groups
             for i, row in cluster_df.iterrows():
-                cluster_id = row["cluster_id"]
-                color = colors(cluster_id)
+                cluster = row["cluster"]
+                color = colors(cluster)
 
                 # Create popup content with vulnerability index
                 popup_content = f"""
@@ -423,11 +421,11 @@ class GeOPTICS(Cluster):
                     fill_color=color,
                     fill_opacity=0.7,
                     popup=folium.Popup(popup_content, max_width=300),
-                    tooltip=f"Cluster {cluster_id}: {row.get('name', 'Unknown')}",
-                ).add_to(cluster_groups[cluster_id])
+                    tooltip=f"Cluster {cluster}: {row.get('name', 'Unknown')}",
+                ).add_to(cluster_groups[cluster])
 
             # Add all feature groups to the map
-            for cluster_id, feature_group in cluster_groups.items():
+            for cluster, feature_group in cluster_groups.items():
                 feature_group.add_to(m)
 
             # Add centroids if provided
@@ -438,7 +436,7 @@ class GeOPTICS(Cluster):
                     folium.Marker(
                         location=[row["latitude"], row["longitude"]],
                         icon=folium.Icon(color="red", icon="info-sign"),
-                        popup=f"Centroid {row['cluster_id']}: {row.get('size', 'N/A')} points",
+                        popup=f"Centroid {row['cluster']}: {row.get('size', 'N/A')} points",
                     ).add_to(centroid_group)
 
                 centroid_group.add_to(m)
@@ -496,7 +494,7 @@ class GeOPTICS(Cluster):
                     place_name = "unknown"
 
             # Load and filter data
-            df = self.load_data(data_source, time_windows_path, evaluation_time)
+            df = self.load(data_source, time_windows_path, evaluation_time)
 
             # Run clustering
             cluster_df, centroids_df = self.run_clustering(

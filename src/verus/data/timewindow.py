@@ -68,7 +68,7 @@ class TimeWindowGenerator(Logger):
 
     def __init__(
         self,
-        output_dir="time_windows",
+        output_dir=None,
         reference_date=None,
         schedules=None,
         verbose=True,
@@ -186,7 +186,7 @@ class TimeWindowGenerator(Logger):
                 )
                 return False
 
-            file_path = os.path.join(self.output_dir, f"{poti_type}.csv")
+            file_path = os.path.join(self.time_windows_dir, f"{poti_type}.csv")
             file_exists = os.path.exists(file_path)
 
             # Determine write mode
@@ -198,14 +198,14 @@ class TimeWindowGenerator(Logger):
 
             # Write to file
             with open(file_path, mode, newline="") as csvfile:
-                fieldnames = ["V", "ts", "te"]
+                fieldnames = ["vi", "ts", "te"]
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
                 if not file_exists or replace:
                     writer.writeheader()
 
                 writer.writerow(
-                    {"V": vulnerability, "ts": start_timestamp, "te": end_timestamp}
+                    {"vi": vulnerability, "ts": start_timestamp, "te": end_timestamp}
                 )
 
             self.log(
@@ -228,10 +228,10 @@ class TimeWindowGenerator(Logger):
             int: Number of time windows created
         """
         # Clear existing files if requested
-        if clear_existing and os.path.exists(self.output_dir):
-            self.log(f"Clearing existing time windows in {self.output_dir}")
-            shutil.rmtree(self.output_dir)
-            os.makedirs(self.output_dir)
+        if clear_existing and os.path.exists(self.time_windows_dir):
+            self.log(f"Clearing existing time windows in {self.time_windows_dir}")
+            shutil.rmtree(self.time_windows_dir)
+            os.makedirs(self.time_windows_dir)
 
         # Count created windows
         windows_created = 0
@@ -298,10 +298,10 @@ class TimeWindowGenerator(Logger):
         active_windows = {}
 
         try:
-            for file in os.listdir(self.output_dir):
+            for file in os.listdir(self.time_windows_dir):
                 if file.endswith(".csv"):
                     poi_type = os.path.splitext(file)[0]
-                    file_path = os.path.join(self.output_dir, file)
+                    file_path = os.path.join(self.time_windows_dir, file)
 
                     # Read the CSV
                     df = pd.read_csv(file_path)
@@ -311,7 +311,7 @@ class TimeWindowGenerator(Logger):
 
                     if not active.empty:
                         # Use the maximum vulnerability if multiple windows are active
-                        active_windows[poi_type] = active["V"].max()
+                        active_windows[poi_type] = active["vi"].max()
 
             return active_windows
 
@@ -381,7 +381,7 @@ class TimeWindowGenerator(Logger):
             )
 
             # Write to HTML file
-            pio.write_html(fig, output_file)
+            pio.write_html(fig, os.path.join(self.time_windows_dir, output_file))
             self.log(f"Schedule visualization saved to {output_file}")
             return True
 
@@ -409,12 +409,12 @@ class TimeWindowGenerator(Logger):
             bool: True if successful, False otherwise
         """
         try:
-            if os.path.exists(self.output_dir):
-                self.log(f"Clearing all time windows in {self.output_dir}")
+            if os.path.exists(self.time_windows_dir):
+                self.log(f"Clearing all time windows in {self.time_windows_dir}")
 
-                for file in os.listdir(self.output_dir):
+                for file in os.listdir(self.time_windows_dir):
                     if file.endswith(".csv"):
-                        os.remove(os.path.join(self.output_dir, file))
+                        os.remove(os.path.join(self.time_windows_dir, file))
 
                 self.log("Time windows cleared successfully")
                 return True

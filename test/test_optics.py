@@ -59,7 +59,7 @@ if __name__ == "__main__":
         # Check results
         if results["clusters"] is not None:
             # Get unique cluster count
-            num_unique_clusters = len(results["clusters"]["cluster_id"].unique())
+            num_unique_clusters = len(results["clusters"]["cluster"].unique())
             print(
                 f"Created {num_unique_clusters} clusters with {len(results['clusters'])} total points"
             )

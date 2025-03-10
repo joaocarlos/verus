@@ -24,7 +24,7 @@ class Cluster(Logger):
         # Initialize path manager
         self.paths = PathManager(output_dir=output_dir)
 
-    def load_data(self, data_source):
+    def load(self, data_source):
         """
         Load data from a file or DataFrame.
 
@@ -47,9 +47,7 @@ class Cluster(Logger):
             self.log(f"Error loading data: {e}", "error")
             return None
 
-    def save_results(
-        self, cluster_df, centroids_df, place_name, suffix="", algorithm=""
-    ):
+    def save(self, cluster_df, centroids_df, place_name, suffix="", algorithm=""):
         """
         Save clustering results to CSV files.
 

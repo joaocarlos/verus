@@ -332,7 +332,7 @@ class KMeansHaversine(Cluster):
         labels = np.argmin(dist, axis=1)
         return labels
 
-    def load_data(self, data_source):
+    def load(self, data_source):
         """
         Load POI data. Simplified to just load data without time window processing.
 
@@ -344,7 +344,7 @@ class KMeansHaversine(Cluster):
         """
         try:
             # Use base class method to load data
-            df = super().load_data(data_source)
+            df = super().load(data_source)
 
             # Basic validation
             required_columns = ["latitude", "longitude"]
@@ -419,7 +419,7 @@ class KMeansHaversine(Cluster):
                     cluster_data.append([point[0], point[1], i])
 
             cluster_df = pd.DataFrame(
-                cluster_data, columns=["latitude", "longitude", "cluster_id"]
+                cluster_data, columns=["latitude", "longitude", "cluster"]
             )
 
             # Merge with original data to include category, name, and vi
@@ -436,7 +436,7 @@ class KMeansHaversine(Cluster):
 
             # Create centroids DataFrame
             centroids_df = pd.DataFrame(centers, columns=["latitude", "longitude"])
-            centroids_df["cluster_id"] = range(len(centers))
+            centroids_df["cluster"] = range(len(centers))
 
             # Calculate size of each cluster
             cluster_sizes = pd.Series(labels).value_counts().sort_index()
@@ -445,7 +445,7 @@ class KMeansHaversine(Cluster):
             ]
 
             # Reorder columns
-            centroids_df = centroids_df[["cluster_id", "latitude", "longitude", "size"]]
+            centroids_df = centroids_df[["cluster", "latitude", "longitude", "size"]]
 
             return cluster_df, centroids_df
 
@@ -483,7 +483,7 @@ class KMeansHaversine(Cluster):
             cmap = plt.get_cmap("turbo")
 
             # Get unique cluster values and create a mapping to indices
-            unique_clusters = sorted(cluster_df["cluster_id"].unique())
+            unique_clusters = sorted(cluster_df["cluster"].unique())
             cluster_to_index = {cluster: i for i, cluster in enumerate(unique_clusters)}
             n_clusters = len(unique_clusters)
 
@@ -512,7 +512,7 @@ class KMeansHaversine(Cluster):
                 k = cluster_to_index[cluster_val]
                 color = colors[k]
 
-                cluster_points = cluster_df[cluster_df["cluster_id"] == cluster_val]
+                cluster_points = cluster_df[cluster_df["cluster"] == cluster_val]
                 if len(cluster_points) == 0:
                     continue
 
@@ -548,13 +548,13 @@ class KMeansHaversine(Cluster):
                 centroid_group = folium.FeatureGroup(name="Cluster Centroids")
 
                 for _, row in centroids_df.iterrows():
-                    cluster_id = row["cluster_id"]
+                    cluster = row["cluster"]
 
                     # Use the mapping to get the correct color index
-                    if cluster_id in cluster_to_index and cluster_to_index[
-                        cluster_id
-                    ] < len(colors):
-                        color_idx = cluster_to_index[cluster_id]
+                    if cluster in cluster_to_index and cluster_to_index[cluster] < len(
+                        colors
+                    ):
+                        color_idx = cluster_to_index[cluster]
                         hex_color = mpl.colors.rgb2hex(colors[color_idx])
                     else:
                         hex_color = "#FF0000"  # Default to red if out of range
@@ -562,7 +562,7 @@ class KMeansHaversine(Cluster):
                     folium.Marker(
                         location=[row["latitude"], row["longitude"]],
                         icon=folium.Icon(color="red", icon="info-sign"),
-                        popup=f"Centroid {cluster_id}: {row.get('size', 'N/A')} points",
+                        popup=f"Centroid {cluster}: {row.get('size', 'N/A')} points",
                     ).add_to(centroid_group)
 
                 centroid_group.add_to(m)
@@ -618,7 +618,7 @@ class KMeansHaversine(Cluster):
 
             # Load data
             self.log("Loading and preparing data")
-            df, coords = self.load_data(data_source)
+            df, coords = self.load(data_source)
 
             # Handle predefined centers
             if centers_input is not None:
@@ -671,7 +671,7 @@ class KMeansHaversine(Cluster):
             # Save results if requested
             if save_output and place_name:
                 # Use the base class method with our custom suffix
-                self.save_results(
+                self.save(
                     cluster_df,
                     centroids_df,
                     place_name,
