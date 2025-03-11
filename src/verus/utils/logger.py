@@ -39,7 +39,7 @@ def log(message, level="info", verbose=True):
         "info": {
             "prefix": "INFO",
             "color": Fore.MAGENTA if COLORS_AVAILABLE else "",
-        },  # Changed to MAGENTA
+        },
         "warning": {
             "prefix": "WARNING",
             "color": Fore.YELLOW if COLORS_AVAILABLE else "",

@@ -5,7 +5,7 @@ A package for spatial data extraction, clustering, and risk analysis.
 """
 
 # Package metadata - defined ONCE for the whole project
-__version__ = "0.1.0"  # Follow semantic versioning
+__version__ = "0.1.0"
 __author__ = "João Carlos N. Bittencourt"
 __team__ = "Laboratory of Emerging Smart Systems"
 __email__ = "joaocarlos@ufrb.edu.br"
@@ -14,6 +14,7 @@ __email__ = "joaocarlos@ufrb.edu.br"
 from .clustering import GeOPTICS, KMeansHaversine
 from .data import DataExtractor
 from .grid import HexagonGridGenerator
+from .verus import VulnerabilityAssessor
 
 # Define public API
 __all__ = [
@@ -21,4 +22,5 @@ __all__ = [
     "GeOPTICS",
     "DataExtractor",
     "HexagonGridGenerator",
+    "VulnerabilityAssessor",
 ]

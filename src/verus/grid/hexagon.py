@@ -1,3 +1,10 @@
+"""
+Hexagon grid generation module for the Verus project.
+
+This module provides functionality to generate and manage hexagonal grids
+for spatial analysis of Points of Interest (POIs).
+"""
+
 import math
 import os
 
@@ -5,7 +12,6 @@ import folium
 import geopandas as gpd
 import numpy as np
 import shapely
-import shapely.geometry
 from osmnx import geocoder
 from pyproj import Transformer
 from shapely.geometry import Polygon
@@ -14,25 +20,52 @@ from verus.utils.logger import Logger
 
 
 class HexagonGridGenerator(Logger):
+    """
+    Generate and manage hexagonal grids for spatial analysis.
+
+    This class provides methods for creating hexagonal grids over geographic
+    regions, assigning values to cells, and visualizing the results.
+    Hexagonal grids are represented as GeoDataFrames and can be optionally
+    saved to disk.
+
+    Attributes:
+        region (str): The region name for grid generation.
+        edge_length (float): Length of each hexagon edge in meters.
+        place_name (str): Simplified region name for file naming.
+
+    Examples:
+        >>> generator = HexagonGridGenerator(region="Porto, Portugal")
+        >>> grid = generator.run()
+        >>> generator.save_to_geojson(grid)
+    """
+
     def __init__(
         self,
         region="Porto, Portugal",
         edge_length=250,
-        output_dir=None,  # Add output_dir parameter
         verbose=True,
     ):
         """
-        Initialize the HexagonGridGenerator with input validation
+        Initialize the HexagonGridGenerator.
 
-        Args:
-            region (str): Region to generate hexagon grid for (e.g. "Porto, Portugal")
-            edge_length (int): Length of each hexagon edge in meters
-            output_dir (str, optional): Base directory for output files
-            verbose (bool): Whether to print informational messages
+        Parameters
+        ----------
+        region : str
+            Region to generate hexagon grid for (e.g. "Porto, Portugal")
+        edge_length : int or float
+            Length of each hexagon edge in meters
+        verbose : bool
+            Whether to print log messages
+
+        Raises
+        ------
+        ValueError
+            If region is not a valid string or edge_length is not positive
         """
         # Initialize the Logger
         super().__init__(verbose=verbose)
 
+        # Validate inputs
         if not isinstance(region, str) or not region.strip():
             raise ValueError("Region must be a non-empty string")
 
@@ -43,52 +76,31 @@ class HexagonGridGenerator(Logger):
         self.edge_length = edge_length
         self.place_name = region.split(",")[0].strip()
 
-        # Setup output directories
-        # Convert output_dir to absolute path to ensure consistency
-        if output_dir:
-            self.base_dir = os.path.abspath(output_dir)
-        else:
-            # Default to a data directory in the project root
-            # Get the current file's directory
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            # Go up to project root and then to data subdirectory
-            self.base_dir = os.path.abspath(
-                os.path.join(current_dir, "..", "data")
-            )
-
-        self.log(f"Using base directory: {self.base_dir}")
-
-        # Create absolute paths for all directories
-        self.geojson_dir = os.path.join(self.base_dir, "geojson")
-        self.maps_dir = os.path.join(self.base_dir, "maps")
-
-        # Create place-specific subdirectories
-        if self.place_name:
-            self.geojson_place_dir = os.path.join(self.geojson_dir, self.place_name)
-        else:
-            self.geojson_place_dir = self.geojson_dir
-
-        # Create all necessary directories
-        try:
-            for directory in [self.geojson_dir, self.geojson_place_dir, self.maps_dir]:
-                os.makedirs(directory, exist_ok=True)
-                self.log(f"Ensured directory exists: {directory}")
-        except PermissionError as e:
-            raise PermissionError(f"No permission to create directories: {str(e)}")
-        except Exception as e:
-            self.log(f"Warning: Issue creating directories: {str(e)}", "warning")
+        self.log(
+            f"Initialized grid generator for {self.region} with {edge_length}m edge length"
+        )
 
     def generate_hex_grid(self, bbox, edge_length=None):
         """
-        Generates a flat-topped hexagonal grid within a bounding box.
+        Generate a flat-topped hexagonal grid within a bounding box.
 
-        Args:
-            bbox (tuple): Bounding box as (minx, miny, maxx, maxy) in EPSG:4326
-            edge_length (float, optional): Length of each hexagon edge in meters.
-                                          If None, uses the instance's edge_length.
+        Parameters
+        ----------
+        bbox : tuple
+            Bounding box as (minx, miny, maxx, maxy) in EPSG:4326
+        edge_length : float, optional
+            Length of each hexagon edge in meters.
+            If None, uses the instance's edge_length.
 
-        Returns:
-            GeoDataFrame: GeoDataFrame containing the hexagonal grid
+        Returns
+        -------
+        geopandas.GeoDataFrame
+            GeoDataFrame containing the hexagonal grid
+
+        Raises
+        ------
+        ValueError
+            If grid generation fails
         """
         if edge_length is None:
             edge_length = self.edge_length
@@ -148,49 +160,63 @@ class HexagonGridGenerator(Logger):
 
             # Create GeoDataFrame
             hex_grid = gpd.GeoDataFrame({"geometry": hexagons_wgs84}, crs="EPSG:4326")
+            hex_grid["hex_id"] = [f"h_{i}" for i in range(len(hex_grid))]
 
             return hex_grid
 
         except Exception as e:
-            self.log(f"Failed to generate hexagonal grid: {e}", "error")
-            raise ValueError(f"Failed to generate hexagonal grid: {e}")
+            self.log(f"Failed to generate hexagonal grid: {str(e)}", "error")
+            raise ValueError(f"Failed to generate hexagonal grid: {str(e)}")
 
     def assign_random_values(self, hex_grid, seed=None, min_val=0, max_val=1):
         """
-        Assign random values to the hexagonal grid
+        Assign random values to the hexagonal grid.
 
-        Args:
-            hex_grid (GeoDataFrame): Hexagonal grid
-            seed (int, optional): Random seed for reproducibility
-            min_val (float): Minimum value
-            max_val (float): Maximum value
+        Parameters
+        ----------
+        hex_grid : GeoDataFrame
+            Hexagonal grid
+        seed : int, optional
+            Random seed for reproducibility
+        min_val : float
+            Minimum value
+        max_val : float
+            Maximum value
 
-        Returns:
-            GeoDataFrame: Grid with random values assigned
+        Returns
+        -------
+        GeoDataFrame
+            Grid with random values assigned
         """
         try:
             if seed is not None:
                 np.random.seed(seed)
 
             self.log(f"Assigning random values between {min_val} and {max_val}")
+            hex_grid = hex_grid.copy()
             hex_grid["value"] = np.random.uniform(min_val, max_val, size=len(hex_grid))
 
             return hex_grid
 
         except Exception as e:
-            self.log(f"Failed to assign random values: {e}", "error")
-            raise ValueError(f"Failed to assign random values: {e}")
+            self.log(f"Failed to assign random values: {str(e)}", "error")
+            return hex_grid
 
     def assign_colors(self, hex_grid, color_scale=None):
         """
-        Assign colors to hexagons based on their values
+        Assign colors to hexagons based on their values.
 
-        Args:
-            hex_grid (GeoDataFrame): Hexagonal grid with 'value' column
-            color_scale (callable, optional): Color mapping function
+        Parameters
+        ----------
+        hex_grid : GeoDataFrame
+            Hexagonal grid with 'value' column
+        color_scale : callable, optional
+            Color mapping function
 
-        Returns:
-            GeoDataFrame: Grid with color values assigned
+        Returns
+        -------
+        GeoDataFrame
+            Grid with color values assigned
         """
         try:
             if "value" not in hex_grid.columns:
@@ -206,25 +232,31 @@ class HexagonGridGenerator(Logger):
                 )
 
             self.log("Assigning colors based on values")
+            hex_grid = hex_grid.copy()
             hex_grid["color"] = hex_grid["value"].apply(color_scale)
 
             return hex_grid
 
         except Exception as e:
-            self.log(f"Failed to assign colors: {e}", "warning")
+            self.log(f"Failed to assign colors: {str(e)}", "warning")
             # Return original grid without colors
             return hex_grid
 
     def clip_to_region(self, hex_grid, area_gdf=None):
         """
-        Clip the hexagonal grid to the boundary of the region
+        Clip the hexagonal grid to the boundary of the region.
 
-        Args:
-            hex_grid (GeoDataFrame): Hexagonal grid
-            area_gdf (GeoDataFrame, optional): Area to clip to. If None, uses the region.
+        Parameters
+        ----------
+        hex_grid : GeoDataFrame
+            Hexagonal grid
+        area_gdf : GeoDataFrame, optional
+            Area to clip to. If None, uses the region.
 
-        Returns:
-            GeoDataFrame: Clipped hexagonal grid
+        Returns
+        -------
+        GeoDataFrame
+            Clipped hexagonal grid
         """
         try:
             if area_gdf is None:
@@ -244,47 +276,51 @@ class HexagonGridGenerator(Logger):
             return hex_grid_clipped
 
         except Exception as e:
-            self.log(f"Failed to clip grid to region: {e}", "error")
+            self.log(f"Failed to clip grid to region: {str(e)}", "error")
             return hex_grid  # Return original grid if clipping fails
 
-    def save_to_geojson(self, gdf, filename=None, subfolder=None):
+    def save_to_geojson(self, gdf, path=None):
         """
-        Save GeoDataFrame to a GeoJSON file
+        Save GeoDataFrame to a GeoJSON file.
 
-        Args:
-            gdf (GeoDataFrame): GeoDataFrame to save
-            filename (str, optional): Filename. If None, uses default naming.
-            subfolder (str, optional): Subfolder within geojson_dir
+        Parameters
+        ----------
+        gdf : GeoDataFrame
+            GeoDataFrame to save
+        path : str, optional
+            Where to save the output file. Can be:
+            - A directory path: File will be saved as "{directory}/{place_name}_hex_grid.geojson"
+            - A file path with extension: File saved at this exact path
+            If None, uses "./data/geojson/{place_name}_hex_grid.geojson"
 
-        Returns:
-            str: Path to saved file
+        Returns
+        -------
+        str or None
+            Path to saved file or None if save failed
         """
         if gdf is None or len(gdf) == 0:
             self.log("Cannot save empty geodataframe", "warning")
             return None
 
         try:
-            # Determine filename
-            if filename is None:
+            # Determine path
+            if path is None:
+                # Default path
+                save_dir = os.path.abspath(os.path.join("./data", "geojson"))
                 filename = f"{self.place_name}_hex_grid.geojson"
-
-            # Ensure it has .geojson extension
-            if not filename.endswith(".geojson"):
-                filename += ".geojson"
-
-            # Determine the save directory
-            if subfolder:
-                # If subfolder is provided, create it under the place-specific directory
-                save_dir = os.path.join(self.geojson_place_dir, subfolder)
+                output_file = os.path.join(save_dir, filename)
+            elif path.endswith(".geojson") or path.endswith(".json"):
+                # User specified exact file path
+                output_file = os.path.abspath(path)
+                save_dir = os.path.dirname(output_file)
             else:
-                # Otherwise use the place-specific directory
-                save_dir = self.geojson_place_dir
+                # User specified directory path
+                save_dir = os.path.abspath(path)
+                filename = f"{self.place_name}_hex_grid.geojson"
+                output_file = os.path.join(save_dir, filename)
 
-            # Ensure directory exists
+            # Create directory if it doesn't exist
             os.makedirs(save_dir, exist_ok=True)
-
-            # Create full output path
-            output_file = os.path.join(save_dir, filename)
 
             # Save the file
             gdf.to_file(output_file, driver="GeoJSON")
@@ -292,19 +328,24 @@ class HexagonGridGenerator(Logger):
             return output_file
 
         except Exception as e:
-            self.log(f"Failed to save GeoJSON file: {e}", "error")
+            self.log(f"Failed to save GeoJSON file: {str(e)}", "error")
             return None
 
     def create_map(self, hex_grid, area_gdf=None):
         """
-        Create an interactive folium map with the hexagonal grid
+        Create an interactive folium map with the hexagonal grid.
 
-        Args:
-            hex_grid (GeoDataFrame): Hexagonal grid
-            area_gdf (GeoDataFrame, optional): Area boundary
+        Parameters
+        ----------
+        hex_grid : GeoDataFrame
+            Hexagonal grid
+        area_gdf : GeoDataFrame, optional
+            Area boundary
 
-        Returns:
-            folium.Map: Interactive map
+        Returns
+        -------
+        folium.Map or None
+            Interactive map object or None on error
         """
         try:
             if hex_grid is None or len(hex_grid) == 0:
@@ -315,15 +356,22 @@ class HexagonGridGenerator(Logger):
             if area_gdf is None:
                 area_gdf = geocoder.geocode_to_gdf(self.region)
 
-            # Get center of the map using proper projection for accurate centroid calculation
-            # First convert to a projected CRS
+            # Alternative implementation for the centroid calculation
+            # First convert to a projected CRS for accurate centroid calculation
             area_projected = area_gdf.to_crs(epsg=3857)
-            # Calculate centroid in projected coordinates
-            centroid_projected = area_projected.geometry.centroid
-            # Convert back to WGS84
-            centroid_wgs84 = centroid_projected.to_crs(epsg=4326)
-            center_lat = centroid_wgs84.y.iloc[0]
-            center_lon = centroid_wgs84.x.iloc[0]
+            # Get the geometry column
+            geom_column = area_projected.geometry
+            # Calculate centroid for each geometry in the column
+            centroid_series = geom_column.centroid
+            # Create a new GeoDataFrame with centroids
+            centroid_gdf = gpd.GeoDataFrame(geometry=centroid_series, crs="EPSG:3857")
+            # Project back to WGS84
+            centroid_wgs84 = centroid_gdf.to_crs("EPSG:4326")
+            # Get the first centroid (assuming there's only one area polygon)
+            center_point = centroid_wgs84.geometry.iloc[0]
+            # Extract coordinates
+            center_lat = center_point.y
+            center_lon = center_point.x
 
             self.log("Creating interactive map")
             m = folium.Map(
@@ -375,35 +423,40 @@ class HexagonGridGenerator(Logger):
             return m
 
         except Exception as e:
-            self.log(f"Error creating map: {e}", "error")
+            self.log(f"Error creating map: {str(e)}", "error")
             return None
 
-    def run(self, save_output=False, add_random_values=True, clip=True):
+    def run(self, save_output=False, add_random_values=True, clip=True, path=None):
         """
-        Run the hexagonal grid generation process
+        Run the hexagonal grid generation process.
 
-        Args:
-            save_output (bool): Whether to save outputs to files
-            add_random_values (bool): Whether to add random values to hexagons
-            clip (bool): Whether to clip to region boundary
+        This method handles the complete workflow of:
+        1. Getting the region boundary
+        2. Generating the grid
+        3. Optionally adding values and colors
+        4. Optionally clipping to the region
+        5. Optionally saving outputs
 
-        Returns:
-            GeoDataFrame: Generated hexagonal grid
+        Parameters
+        ----------
+        save_output : bool, optional
+            Whether to save outputs to disk
+        add_random_values : bool, optional
+            Whether to add random values to hexagons
+        clip : bool, optional
+            Whether to clip the grid to region boundary
+        path : str, optional
+            Path for saving outputs, passed to save_to_geojson if save_output=True
+
+        Returns
+        -------
+        GeoDataFrame
+            Generated hexagonal grid
         """
         try:
             # Get the area GeoDataFrame
             self.log(f"Processing region: {self.region}")
             area_gdf = geocoder.geocode_to_gdf(self.region)
-
-            # Save boundary if requested
-            if save_output:
-                boundary_path = os.path.join(
-                    self.geojson_place_dir, f"{self.place_name}_boundaries.geojson"
-                )
-                # Ensure directory exists
-                os.makedirs(os.path.dirname(boundary_path), exist_ok=True)
-                area_gdf.to_file(boundary_path, driver="GeoJSON")
-                self.log(f"Saved boundary to {boundary_path}")
 
             # Get bounding box
             bounding_box = area_gdf.bounds.iloc[0]  # minx, miny, maxx, maxy
@@ -416,30 +469,32 @@ class HexagonGridGenerator(Logger):
                 hex_grid = self.assign_random_values(hex_grid, seed=42)
                 hex_grid = self.assign_colors(hex_grid)
 
-            # Save raw grid if requested
-            if save_output:
-                self.save_to_geojson(
-                    hex_grid, f"{self.place_name}_hex_grid_raw.geojson"
-                )
-
             # Clip to region if requested
             if clip:
                 hex_grid = self.clip_to_region(hex_grid, area_gdf)
 
-                # Save clipped grid if requested
-                if save_output:
-                    self.save_to_geojson(
-                        hex_grid, f"{self.place_name}_hex_grid_clipped.geojson"
-                    )
-
-            # Create and save map if requested
+            # Save outputs if requested
             if save_output:
+                self.save_to_geojson(hex_grid, path=path)
+
+                # Create and save map
                 map_obj = self.create_map(hex_grid, area_gdf)
                 if map_obj:
-                    # Save map to the maps subdirectory using the pre-defined maps_dir
-                    # This ensures we use the absolute path
+                    # Determine map path
+                    if path is None:
+                        maps_dir = os.path.abspath(os.path.join("./data", "maps"))
+                    elif (
+                        os.path.isfile(path)
+                        or path.endswith(".geojson")
+                        or path.endswith(".json")
+                    ):
+                        maps_dir = os.path.dirname(os.path.abspath(path))
+                    else:
+                        maps_dir = os.path.abspath(os.path.join(path, "maps"))
+
+                    os.makedirs(maps_dir, exist_ok=True)
                     map_path = os.path.join(
-                        self.maps_dir, f"{self.place_name}_hex_grid_map.html"
+                        maps_dir, f"{self.place_name}_hex_grid_map.html"
                     )
                     map_obj.save(map_path)
                     self.log(f"Saved map to {map_path}")
@@ -447,5 +502,62 @@ class HexagonGridGenerator(Logger):
             return hex_grid
 
         except Exception as e:
-            self.log(f"Error in hexagon grid generation: {e}", "error")
+            self.log(f"Error in hexagon grid generation: {str(e)}", "error")
             return None
+
+    @classmethod
+    def from_file(cls, file_path, verbose=True):
+        """
+        Create a generator and load grid from an existing file.
+
+        Parameters
+        ----------
+        file_path : str
+            Path to the GeoJSON file with grid data
+        verbose : bool, optional
+            Whether to print log messages
+
+        Returns
+        -------
+        tuple
+            (HexagonGridGenerator instance, GeoDataFrame with grid)
+
+        Raises
+        ------
+        FileNotFoundError
+            If the file doesn't exist
+        ValueError
+            If the file cannot be read as a GeoJSON
+        """
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"Grid file not found: {file_path}")
+
+        # Create a logger for initial messages before the class is instantiated
+        temp_logger = Logger(name="HexagonGrid_Loader", verbose=verbose)
+
+        try:
+            # Load the grid
+            temp_logger.log(f"Loading grid from: {file_path}")
+            grid_gdf = gpd.read_file(file_path)
+
+            if grid_gdf.empty:
+                raise ValueError(f"File contains no valid geometry: {file_path}")
+
+            # Try to extract region name from filename
+            basename = os.path.basename(file_path)
+            name_parts = basename.split("_")[0]
+            region_name = f"{name_parts}, Unknown"
+
+            # Create generator with default settings
+            generator = cls(region=region_name, verbose=verbose)
+            generator.log(f"Loaded {len(grid_gdf)} hexagons from file")
+
+            # Ensure CRS is set
+            if grid_gdf.crs is None:
+                generator.log("Warning: CRS not defined, assuming EPSG:4326", "warning")
+                grid_gdf = grid_gdf.set_crs("EPSG:4326")
+
+            return generator, grid_gdf
+
+        except Exception as e:
+            raise ValueError(f"Error loading grid from {file_path}: {str(e)}")

@@ -1,6 +1,5 @@
 import os
 import signal
-import time
 from functools import wraps
 
 
@@ -17,30 +16,38 @@ def timeout_handler(signum, frame):
 
 def with_timeout(seconds):
     """
-    Decorator to apply timeout to a function.
+    Decorator to limit the execution time of a function.
 
     Args:
-        seconds (int): Timeout in seconds
+        seconds (int): Maximum number of seconds the function is allowed to run
 
     Returns:
-        Function wrapped with timeout functionality
+        Function decorator that raises TimeoutException if the function takes too long
+
+    Example:
+        @with_timeout(5)
+        def slow_function():
+            time.sleep(10)  # This will raise TimeoutException after 5 seconds
     """
 
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            if os.name == "nt":  # Windows doesn't support SIGALRM
-                # On Windows, just execute the function
+            # Windows doesn't support SIGALRM
+            if os.name == "nt":
                 return func(*args, **kwargs)
 
             # On Unix systems, use SIGALRM for timeout
             original_handler = signal.getsignal(signal.SIGALRM)
+            signal.signal(signal.SIGALRM, timeout_handler)
+
             try:
-                signal.signal(signal.SIGALRM, timeout_handler)
-                signal.alarm(seconds)
+                # Set alarm
+                signal.alarm(int(seconds))
                 result = func(*args, **kwargs)
                 return result
             finally:
+                # Cancel alarm and restore original handler
                 signal.alarm(0)
                 signal.signal(signal.SIGALRM, original_handler)
 
@@ -50,46 +57,39 @@ def with_timeout(seconds):
 
 
 class Timer:
-    """Utility for timing code execution."""
+    """
+    Simple context manager for timing code execution.
+
+    Example:
+        with Timer("My operation"):
+            time.sleep(1)
+            # Will print "My operation took 1.00 seconds"
+    """
 
     def __init__(self, name=None):
         """
         Initialize the timer.
 
         Args:
-            name (str, optional): Timer name for identification
+            name (str, optional): Name of the operation being timed. Defaults to None.
         """
-        self.name = name or "Timer"
+        self.name = name
         self.start_time = None
-        self.elapsed = 0
 
     def __enter__(self):
-        """Context manager entry point."""
-        self.start()
-        return self
+        """Start timing when entering the context."""
+        import time
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit point."""
-        self.stop()
-
-    def start(self):
-        """Start the timer."""
         self.start_time = time.time()
         return self
 
-    def stop(self):
-        """Stop the timer and calculate elapsed time."""
-        if self.start_time is None:
-            return 0
-        self.elapsed = time.time() - self.start_time
-        self.start_time = None
-        return self.elapsed
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Print elapsed time when exiting the context."""
+        import time
 
-    def __str__(self):
-        """Return a string representation of the elapsed time."""
-        if self.elapsed >= 60:
-            minutes = int(self.elapsed // 60)
-            seconds = self.elapsed % 60
-            return f"{self.name}: {minutes}m {seconds:.2f}s"
+        elapsed = time.time() - self.start_time
+
+        if self.name:
+            print(f"{self.name} took {elapsed:.2f} seconds")
         else:
-            return f"{self.name}: {self.elapsed:.2f}s"
+            print(f"Operation took {elapsed:.2f} seconds")

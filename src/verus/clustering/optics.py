@@ -1,21 +1,45 @@
+"""
+OPTICS clustering module for the Verus project.
+
+This module provides functionality for applying OPTICS (Ordering Points To Identify
+the Clustering Structure) algorithm to geospatial data, with optional time-based
+vulnerability indexing.
+"""
+
 import os
 from datetime import datetime
 
+import folium
 import numpy as np
 import pandas as pd
+from branca.colormap import linear
 from sklearn.cluster import OPTICS
 from sklearn.neighbors import KNeighborsClassifier
 
-from verus.clustering import Cluster
+from verus.utils.logger import Logger
 
 
-class GeOPTICS(Cluster):
+class GeOPTICS(Logger):
     """
-    Class for performing OPTICS clustering on geospatial data with time-based vulnerability indexing.
+    Perform OPTICS clustering on geospatial data with time-based vulnerability indexing.
 
-    This class implements OPTICS (Ordering Points To Identify the Clustering Structure) algorithm
-    to cluster points of interest based on their spatial proximity, with the option to filter
-    points based on time-specific vulnerability indices.
+    This class implements OPTICS (Ordering Points To Identify the Clustering Structure)
+    algorithm to cluster points of interest based on their spatial proximity, with
+    the option to filter points based on time-specific vulnerability indices.
+
+    Attributes:
+        min_samples (int): The minimum number of samples in a neighborhood for a point
+                           to be considered a core point.
+        xi (float): Determines the minimum steepness on the reachability plot that
+                    constitutes a cluster boundary.
+        min_cluster_size (int): Minimum number of points to form a cluster.
+        et_scenarios (dict): Dictionary of evaluation time scenarios for time-based analysis.
+
+    Examples:
+        >>> optics = GeOPTICS(min_samples=5, xi=0.05)
+        >>> results = optics.run(data_source=poi_df, time_windows_path="./time_windows")
+        >>> clusters_df = results["clusters"]
+        >>> map_obj = results["map"]
     """
 
     def __init__(
@@ -23,27 +47,35 @@ class GeOPTICS(Cluster):
         min_samples=5,
         xi=0.05,
         min_cluster_size=5,
-        output_dir=None,
         verbose=True,
         et_scenarios=None,
     ):
         """
-        Initialize the OpticsClusterer with clustering parameters.
+        Initialize the GeOPTICS clusterer with clustering parameters.
 
-        Args:
-            min_samples (int): The number of samples in a neighborhood for a point
-                              to be considered a core point.
-            xi (float): Determines the minimum steepness on the reachability plot
-                       that constitutes a cluster boundary.
-            min_cluster_size (int): Minimum number of points to form a cluster.
-            output_dir (str, optional): Base directory for output files
-            verbose (bool): Whether to print informational messages.
-            et_scenarios (dict, optional): Custom evaluation time scenarios dictionary.
-                                          Used primarily for debugging.
+        Parameters
+        ----------
+        min_samples : int
+            The number of samples in a neighborhood for a point to be considered a core point.
+        xi : float
+            Determines the minimum steepness on the reachability plot that constitutes
+            a cluster boundary. Must be between 0 and 1.
+        min_cluster_size : int
+            Minimum number of points to form a cluster.
+        verbose : bool
+            Whether to print informational messages.
+        et_scenarios : dict, optional
+            Custom evaluation time scenarios dictionary.
+
+        Raises
+        ------
+        ValueError
+            If any parameter values are invalid.
         """
-        # Initialize the base clusterer
-        super().__init__(output_dir=output_dir, verbose=verbose)
+        # Initialize the Logger
+        super().__init__(verbose=verbose)
 
+        # Validate parameters
         if not isinstance(min_samples, int) or min_samples < 1:
             raise ValueError("min_samples must be a positive integer")
 
@@ -86,22 +118,42 @@ class GeOPTICS(Cluster):
             },
         }
 
-    def load(self, data_source, time_windows_path=None, evaluation_time=None):
+    def load(self, data_source, time_windows=None, evaluation_time=None):
         """
-        Load POI data and optionally time window data.
+        Load POI data and apply optional time window filtering.
 
-        Args:
-            data_source (str or pd.DataFrame): Path to POI CSV file or DataFrame from extraction.py
-            time_windows_path (str, optional): Path to the time windows directory.
-            evaluation_time (str or int, optional): Time scenario key (e.g., "ET4") or
-                                                  epoch timestamp directly.
+        Parameters
+        ----------
+        data_source : str or pd.DataFrame
+            Path to POI CSV file or DataFrame containing point data.
+        time_windows : str or dict or pd.DataFrame, optional
+            Time windows data. Can be:
+            - Path to time windows directory
+            - Dictionary of category-based time window DataFrames
+            - Single DataFrame with 'category', 'ts', 'te', 'vi' columns
+        evaluation_time : str or int, optional
+            Time scenario key (e.g., "ET4") or epoch timestamp.
 
-        Returns:
-            pd.DataFrame: DataFrame containing points of interest, filtered by time if applicable.
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing points of interest, filtered by time if applicable.
+
+        Raises
+        ------
+        ValueError
+            If the data cannot be loaded or processed.
         """
         try:
-            # Use the base class method to load the initial data
-            df = super().load(data_source)
+            # Load data from path or use provided DataFrame
+            if isinstance(data_source, pd.DataFrame):
+                df = data_source.copy()
+                self.log("Using provided DataFrame")
+            elif isinstance(data_source, str) and os.path.exists(data_source):
+                self.log(f"Loading data from file: {data_source}")
+                df = pd.read_csv(data_source)
+            else:
+                raise ValueError(f"Invalid data source: {data_source}")
 
             # Basic validation
             required_columns = ["latitude", "longitude", "category"]
@@ -114,78 +166,60 @@ class GeOPTICS(Cluster):
             self.log(f"Loaded {len(df)} points of interest")
 
             # Process time windows if provided
-            if time_windows_path and evaluation_time:
-                df = self._apply_time_window_filter(
-                    df, time_windows_path, evaluation_time
-                )
+            if time_windows is not None and evaluation_time:
+                df = self._apply_time_window_filter(df, time_windows, evaluation_time)
 
             return df
 
         except Exception as e:
-            self.log(f"Failed to load data: {e}", "error")
-            raise ValueError(f"Failed to load data: {e}")
+            self.log(f"Failed to load data: {str(e)}", "error")
+            raise ValueError(f"Failed to load data: {str(e)}")
 
-    def _apply_time_window_filter(self, df, time_windows_path, evaluation_time):
+    def _apply_time_window_filter(self, df, time_windows, evaluation_time):
         """
         Apply time window filters to the dataset based on the evaluation time.
 
-        Args:
-            df (pd.DataFrame): Original POI dataframe.
-            time_windows_path (str): Path to the time windows directory.
-            evaluation_time (str or int): Evaluation time scenario key or epoch timestamp.
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Original POI dataframe.
+        time_windows : str or dict or pd.DataFrame
+            Time windows data. Can be:
+            - Path to time windows directory
+            - Dictionary of category-based time window DataFrames
+            - Single DataFrame with 'category', 'ts', 'te', 'vi' columns
+        evaluation_time : str or int
+            Evaluation time scenario key or epoch timestamp.
 
-        Returns:
-            pd.DataFrame: Filtered dataframe based on time window activity.
+        Returns
+        -------
+        pd.DataFrame
+            Filtered dataframe based on time window activity.
+
+        Raises
+        ------
+        ValueError
+            If the time window processing fails.
         """
         try:
-            # Handle either scenario key or direct timestamp
-            if (
-                isinstance(evaluation_time, str)
-                and evaluation_time in self.et_scenarios
-            ):
-                scenario_info = self.et_scenarios[evaluation_time]
-                self.log(
-                    f"Evaluating {scenario_info['name']}:\n{scenario_info['description']}"
-                )
-                epoch_time = scenario_info["datetime"]
-            elif isinstance(evaluation_time, (int, float)):
-                epoch_time = int(evaluation_time)
-                self.log(f"Using direct epoch timestamp: {epoch_time}")
-            else:
-                # Try to convert string representation of timestamp to int
-                try:
-                    epoch_time = int(evaluation_time)
-                    self.log(f"Using parsed epoch timestamp: {epoch_time}")
-                except (ValueError, TypeError):
-                    self.log(
-                        f"Unknown evaluation time format: {evaluation_time}", "error"
-                    )
-                    raise ValueError(
-                        f"Unknown evaluation time format: {evaluation_time}"
-                    )
+            # Resolve evaluation time to epoch timestamp
+            epoch_time = self._resolve_evaluation_time(evaluation_time)
 
-            self.log(f"Epoch Time: {epoch_time} UTC")
+            # Format the time for logging
+            time_str = datetime.fromtimestamp(epoch_time).strftime("%Y-%m-%d %H:%M:%S")
+            self.log(f"Epoch Time: {epoch_time} ({time_str})")
 
-            # Load time windows data
-            self.log(f"Loading time windows from: {time_windows_path}")
-            time_windows_df = []
+            # Load time windows data based on input type
+            time_windows_df = self._load_time_windows(time_windows)
 
-            for file in os.listdir(time_windows_path):
-                if file.endswith(".csv"):
-                    time_window = pd.read_csv(os.path.join(time_windows_path, file))
-                    time_window["category"] = os.path.splitext(file)[0]
-                    time_windows_df.append(time_window)
-
-            if not time_windows_df:
-                self.log("No time window files found", "warning")
+            if time_windows_df is None or time_windows_df.empty:
+                self.log("No time window data available", "warning")
                 return df
 
-            time_windows = pd.concat(time_windows_df, ignore_index=True)
-            self.log(f"Loaded {len(time_windows)} time window entries")
-
             # Filter time windows for the selected time
-            filtered_time_windows = time_windows[
-                (time_windows["ts"] <= epoch_time) & (time_windows["te"] >= epoch_time)
+            filtered_time_windows = time_windows_df[
+                (time_windows_df["ts"] <= epoch_time)
+                & (time_windows_df["te"] >= epoch_time)
             ]
 
             if filtered_time_windows.empty:
@@ -214,23 +248,141 @@ class GeOPTICS(Cluster):
             return df
 
         except Exception as e:
-            self.log(f"Failed to apply time window filter: {e}", "error")
-            raise ValueError(f"Failed to apply time window filter: {e}")
+            self.log(f"Failed to apply time window filter: {str(e)}", "error")
+            raise ValueError(f"Failed to apply time window filter: {str(e)}")
 
-    def run_clustering(
-        self, df, place_name=None, evaluation_time=None, save_output=False
-    ):
+    def _resolve_evaluation_time(self, evaluation_time):
+        """
+        Convert evaluation time to epoch timestamp.
+
+        Parameters
+        ----------
+        evaluation_time : str or int or float
+            Evaluation time identifier or timestamp.
+
+        Returns
+        -------
+        int
+            Epoch timestamp.
+        """
+        # Handle either scenario key or direct timestamp
+        if isinstance(evaluation_time, str) and evaluation_time in self.et_scenarios:
+            scenario_info = self.et_scenarios[evaluation_time]
+            self.log(
+                f"Evaluating {scenario_info['name']}:\n{scenario_info['description']}"
+            )
+            return scenario_info["datetime"]
+        elif isinstance(evaluation_time, (int, float)):
+            return int(evaluation_time)
+        else:
+            # Try to convert string representation of timestamp to int
+            try:
+                return int(evaluation_time)
+            except (ValueError, TypeError):
+                self.log(f"Unknown evaluation time format: {evaluation_time}", "error")
+                raise ValueError(f"Unknown evaluation time format: {evaluation_time}")
+
+    def _load_time_windows(self, time_windows):
+        """
+        Load time windows from various input formats.
+
+        Parameters
+        ----------
+        time_windows : str or dict or pd.DataFrame
+            Time windows data in various formats.
+
+        Returns
+        -------
+        pd.DataFrame or None
+            Processed time windows DataFrame or None if loading fails.
+        """
+        # Case 1: DataFrame already provided
+        if isinstance(time_windows, pd.DataFrame):
+            # Validate required columns
+            required_cols = ["category", "ts", "te", "vi"]
+            missing_cols = [
+                col for col in required_cols if col not in time_windows.columns
+            ]
+
+            if missing_cols:
+                self.log(
+                    f"Time windows DataFrame missing columns: {missing_cols}", "warning"
+                )
+                return None
+
+            self.log(
+                f"Using provided time windows DataFrame with {len(time_windows)} entries"
+            )
+            return time_windows
+
+        # Case 2: Dictionary of DataFrames by category
+        elif isinstance(time_windows, dict):
+            dfs = []
+            for category, df in time_windows.items():
+                if isinstance(df, pd.DataFrame) and not df.empty:
+                    # Add category column if not present
+                    if "category" not in df.columns:
+                        df = df.copy()
+                        df["category"] = category
+                    dfs.append(df)
+
+            if not dfs:
+                self.log("No valid DataFrames in time windows dictionary", "warning")
+                return None
+
+            combined_df = pd.concat(dfs, ignore_index=True)
+            self.log(
+                f"Using provided dictionary with {len(combined_df)} time window entries"
+            )
+            return combined_df
+
+        # Case 3: Path to directory with CSV files
+        elif isinstance(time_windows, str) and os.path.exists(time_windows):
+            self.log(f"Loading time windows from directory: {time_windows}")
+            time_windows_df = []
+
+            for file in os.listdir(time_windows):
+                if file.endswith(".csv"):
+                    try:
+                        file_path = os.path.join(time_windows, file)
+                        time_window = pd.read_csv(file_path)
+                        # Extract category from filename
+                        category = os.path.splitext(file)[0]
+                        # Add category if not present
+                        if "category" not in time_window.columns:
+                            time_window["category"] = category
+                        time_windows_df.append(time_window)
+                    except Exception as e:
+                        self.log(f"Error loading file {file}: {str(e)}", "warning")
+
+            if not time_windows_df:
+                self.log("No time window files found", "warning")
+                return None
+
+            combined_df = pd.concat(time_windows_df, ignore_index=True)
+            self.log(f"Loaded {len(combined_df)} time window entries from files")
+            return combined_df
+
+        # Invalid input
+        else:
+            self.log(
+                f"Invalid time windows input format: {type(time_windows)}", "warning"
+            )
+            return None
+
+    def fit(self, df):
         """
         Run OPTICS clustering on the dataset.
 
-        Args:
-            df (pd.DataFrame): DataFrame containing points of interest with lat/lon coordinates.
-            place_name (str, optional): Name of the location for output files.
-            evaluation_time (str or int, optional): Time scenario key or timestamp for output files.
-            save_output (bool): Whether to save the results to files.
+        Parameters
+        ----------
+        df : pd.DataFrame
+            DataFrame containing points of interest with lat/lon coordinates.
 
-        Returns:
-            tuple: (cluster_df, centroids_df) - DataFrames with cluster assignments and centroids.
+        Returns
+        -------
+        tuple
+            (cluster_df, centroids_df) - DataFrames with cluster assignments and centroids.
         """
         try:
             # Extract coordinates for clustering
@@ -291,7 +443,6 @@ class GeOPTICS(Cluster):
                 self.log("No clusters found after filtering noise points", "warning")
                 return None, None
 
-            # Rename 'cluster' to 'cluster' for consistency with the base class
             cluster_df = pd.DataFrame(
                 cluster_data, columns=["latitude", "longitude", "cluster"]
             )
@@ -328,38 +479,38 @@ class GeOPTICS(Cluster):
 
             centroids_df = pd.DataFrame(centroids, columns=["latitude", "longitude"])
             centroids_df["cluster"] = clusters
-            # Add size for consistency with base class
             centroids_df["size"] = cluster_sizes
             centroids_df = centroids_df[["cluster", "latitude", "longitude", "size"]]
-
-            # Save results if requested - using the base class method
-            if save_output and place_name:
-                self.save(
-                    cluster_df, centroids_df, place_name, evaluation_time, "OPTICS"
-                )
 
             return cluster_df, centroids_df
 
         except Exception as e:
-            self.log(f"Error in clustering: {e}", "error")
+            self.log(f"Error in clustering: {str(e)}", "error")
             return None, None
 
-    def create_optics_map(self, cluster_df, centroids_df=None, area_boundary_path=None):
+    def create_map(
+        self, cluster_df, centroids_df=None, area_boundary_path=None, save_path=None
+    ):
         """
-        Create a specialized OPTICS map with custom coloring.
+        Create an interactive map visualizing the clustering results.
 
-        Args:
-            cluster_df (pd.DataFrame): DataFrame with cluster assignments.
-            centroids_df (pd.DataFrame, optional): DataFrame with cluster centroids.
-            area_boundary_path (str, optional): Path to area boundary GeoJSON file.
+        Parameters
+        ----------
+        cluster_df : pd.DataFrame
+            DataFrame with cluster assignments.
+        centroids_df : pd.DataFrame, optional
+            DataFrame with cluster centroids.
+        area_boundary_path : str, optional
+            Path to area boundary GeoJSON file.
+        save_path : str, optional
+            Path to save the map HTML file. If None, the map is just returned.
 
-        Returns:
-            folium.Map: Interactive map with clusters and centroids.
+        Returns
+        -------
+        folium.Map or None
+            Interactive map with clusters and centroids, or None on error.
         """
         try:
-            import folium
-            from branca.colormap import linear
-
             if cluster_df is None or len(cluster_df) == 0:
                 self.log("No data available to create map", "warning")
                 return None
@@ -388,17 +539,14 @@ class GeOPTICS(Cluster):
                     },
                 ).add_to(m)
 
-            # Add cluster points - create a colormap for clusters
+            # Create a colormap for clusters
             self.log("Adding cluster points to map")
             num_clusters = len(cluster_df["cluster"].unique())
             colors = linear.viridis.scale(0, max(1, num_clusters - 1))
 
-            # Add points by cluster with consistent colors but without clustering
-            cluster_groups = {}  # Store feature groups for each cluster
-
             # Create feature groups for each cluster
+            cluster_groups = {}
             for cluster in sorted(cluster_df["cluster"].unique()):
-                # Create a feature group for this cluster
                 cluster_groups[cluster] = folium.FeatureGroup(name=f"Cluster {cluster}")
 
             # Add points to their respective feature groups
@@ -406,12 +554,13 @@ class GeOPTICS(Cluster):
                 cluster = row["cluster"]
                 color = colors(cluster)
 
-                # Create popup content with vulnerability index
+                # Create popup content
                 popup_content = f"""
                 <b>{row.get('name', 'Unknown')}</b><br>
-                Category: {row.get('category', 'Unknown')}<br>
-                VI: {row.get('vi', 'N/A')}
+                Category: {row.get('category', 'Unknown')}
                 """
+                if "vi" in row:
+                    popup_content += f"<br>Vulnerability Index: {row['vi']}"
 
                 folium.CircleMarker(
                     location=[row["latitude"], row["longitude"]],
@@ -421,7 +570,7 @@ class GeOPTICS(Cluster):
                     fill_color=color,
                     fill_opacity=0.7,
                     popup=folium.Popup(popup_content, max_width=300),
-                    tooltip=f"Cluster {cluster}: {row.get('name', 'Unknown')}",
+                    tooltip=f"Cluster {cluster}: {row.get('category', 'Unknown')}",
                 ).add_to(cluster_groups[cluster])
 
             # Add all feature groups to the map
@@ -444,97 +593,176 @@ class GeOPTICS(Cluster):
             # Add layer control to toggle visibility
             folium.LayerControl().add_to(m)
 
+            # Save map if path provided
+            if save_path:
+                try:
+                    # Create directory if it doesn't exist
+                    save_dir = os.path.dirname(os.path.abspath(save_path))
+                    os.makedirs(save_dir, exist_ok=True)
+
+                    # Save the map
+                    m.save(save_path)
+                    self.log(f"Saved map to: {save_path}", "success")
+                except Exception as e:
+                    self.log(f"Failed to save map: {str(e)}", "error")
+
             return m
 
         except Exception as e:
-            self.log(f"Error creating map: {e}", "error")
+            self.log(f"Error creating map: {str(e)}", "error")
             return None
+
+    def save(self, cluster_df, centroids_df, path=None, evaluation_time=None):
+        """
+        Save clustering results to CSV files.
+
+        Parameters
+        ----------
+        cluster_df : pd.DataFrame
+            DataFrame with cluster assignments.
+        centroids_df : pd.DataFrame
+            DataFrame with cluster centroids.
+        path : str, optional
+            Directory or file path to save results.
+            If None, uses "./data/clusters".
+        evaluation_time : str, optional
+            Time scenario identifier to include in filenames.
+
+        Returns
+        -------
+        dict
+            Dictionary with paths to saved files.
+        """
+        if cluster_df is None:
+            self.log("No cluster data to save", "warning")
+            return {}
+
+        try:
+            # Determine base directory and file names
+            if path is None:
+                save_dir = os.path.abspath("./data/clusters")
+                filename_prefix = "optics"
+            elif os.path.isdir(path) or not path.endswith(".csv"):
+                save_dir = os.path.abspath(path)
+                filename_prefix = "optics"
+            else:
+                save_dir = os.path.dirname(os.path.abspath(path))
+                filename_prefix = os.path.splitext(os.path.basename(path))[0]
+
+            # Create directory if it doesn't exist
+            os.makedirs(save_dir, exist_ok=True)
+
+            # Format evaluation time for filename
+            time_suffix = f"_{evaluation_time}" if evaluation_time else ""
+
+            # Save cluster assignments
+            clusters_path = os.path.join(
+                save_dir, f"{filename_prefix}_clusters{time_suffix}.csv"
+            )
+            cluster_df.to_csv(clusters_path, index=False)
+            self.log(f"Saved clusters to: {clusters_path}", "success")
+
+            saved_files = {"clusters": clusters_path}
+
+            # Save centroids if available
+            if centroids_df is not None and not centroids_df.empty:
+                centroids_path = os.path.join(
+                    save_dir, f"{filename_prefix}_centroids{time_suffix}.csv"
+                )
+                centroids_df.to_csv(centroids_path, index=False)
+                self.log(f"Saved centroids to: {centroids_path}", "success")
+                saved_files["centroids"] = centroids_path
+
+            return saved_files
+
+        except Exception as e:
+            self.log(f"Failed to save results: {str(e)}", "error")
+            return {}
 
     def run(
         self,
         data_source,
-        place_name=None,
-        time_windows_path=None,
+        time_windows=None,
         evaluation_time=None,
-        save_output=False,
-        create_map=False,
-        area_boundary_path=None,  # Add boundary path parameter for consistency
+        area_boundary_path=None,
     ):
         """
         Run the complete clustering workflow.
 
-        Args:
-            data_source (str or pd.DataFrame): Path to POI CSV file or DataFrame from extraction.py
-            place_name (str, optional): Name of the location for output files.
-            time_windows_path (str, optional): Path to the time windows directory.
-            evaluation_time (str or int, optional): Time scenario key (e.g., "ET4") or timestamp.
-            save_output (bool): Whether to save the results to files.
-            create_map (bool): Whether to create and return a map.
-            area_boundary_path (str, optional): Path to area boundary GeoJSON file.
+        Parameters
+        ----------
+        data_source : str or pd.DataFrame
+            Path to POI CSV file or DataFrame from extraction.py
+        time_windows : str or dict or pd.DataFrame, optional
+            Time windows data. Can be:
+            - Path to time windows directory
+            - Dictionary of category-based time window DataFrames
+            - Single DataFrame with 'category', 'ts', 'te', 'vi' columns
+        evaluation_time : str or int, optional
+            Time scenario key (e.g., "ET4") or timestamp.
+        area_boundary_path : str, optional
+            Path to area boundary GeoJSON file for map visualization.
 
-        Returns:
-            dict: Dictionary containing clustering results:
+        Returns
+        -------
+        dict
+            Dictionary containing clustering results:
                 - 'clusters': DataFrame with cluster assignments
                 - 'centroids': DataFrame with cluster centroids
-                - 'map': Folium map object (if create_map is True)
+                - 'map': Folium map object if area_boundary_path was provided
                 - 'input_data': Filtered input data used for clustering
+                - 'place_name': Extracted place name from source (if available)
         """
         try:
-            # Extract place name from path if not provided
-            if place_name is None:
-                if isinstance(data_source, str):
-                    import os
-
-                    filename = os.path.basename(data_source)
-                    if "_dataset" in filename:
-                        place_name = filename.split("_dataset")[0]
-                    else:
-                        place_name = "unknown"
-                else:
-                    place_name = "unknown"
+            # Extract place name from path if possible
+            place_name = self._extract_place_name(data_source)
 
             # Load and filter data
-            df = self.load(data_source, time_windows_path, evaluation_time)
+            df = self.load(data_source, time_windows, evaluation_time)
 
             # Run clustering
-            cluster_df, centroids_df = self.run_clustering(
-                df, place_name, evaluation_time, save_output
-            )
+            cluster_df, centroids_df = self.fit(df)
 
-            # Create map if requested
+            # Create map if boundary path was provided
             map_obj = None
-            if create_map and cluster_df is not None:
-                # Use either the specialized OPTICS map or the base class map
-                map_obj = self.create_optics_map(
-                    cluster_df, centroids_df, area_boundary_path
-                )
+            if area_boundary_path and cluster_df is not None:
+                map_obj = self.create_map(cluster_df, centroids_df, area_boundary_path)
 
-                # Save map if requested
-                if save_output and map_obj:
-                    # Format the evaluation time for filename
-                    suffix = evaluation_time if evaluation_time else ""
-
-                    # Use the paths manager from base class
-                    map_path = self.paths.get_path(
-                        "maps", f"{place_name}_Map_OPTICS_{suffix}.html"
-                    )
-
-                    map_obj.save(map_path)
-                    self.log(f"Saved map to: {map_path}", "success")
-
-            # Return filtered input data as well for analysis
+            # Return results
             return {
                 "clusters": cluster_df,
                 "centroids": centroids_df,
                 "map": map_obj,
                 "input_data": df,
+                "place_name": place_name,
             }
 
         except Exception as e:
-            self.log(f"Error in clustering workflow: {e}", "error")
+            self.log(f"Error in clustering workflow: {str(e)}", "error")
             return {
                 "clusters": None,
                 "centroids": None,
                 "map": None,
                 "input_data": None,
+                "place_name": None,
             }
+
+    def _extract_place_name(self, data_source):
+        """
+        Extract place name from data source if possible.
+
+        Parameters
+        ----------
+        data_source : str or pd.DataFrame
+            Data source to extract place name from.
+
+        Returns
+        -------
+        str
+            Extracted place name or "unknown".
+        """
+        if isinstance(data_source, str):
+            filename = os.path.basename(data_source)
+            if "_dataset" in filename:
+                return filename.split("_dataset")[0]
+        return "unknown"

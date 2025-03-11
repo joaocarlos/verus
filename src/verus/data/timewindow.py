@@ -1,20 +1,35 @@
-import csv
+"""
+Time window generation module for the Verus project.
+
+This module provides functionality to generate and manage time windows that
+define when certain POI types are active and their vulnerability indices.
+"""
+
 import os
-import shutil
 from datetime import datetime, timedelta
 
 import pandas as pd
 
 from verus.utils.logger import Logger
-from verus.utils.paths import PathManager
 
 
 class TimeWindowGenerator(Logger):
     """
-    Class for generating temporal influence time windows.
+    Generate and manage temporal influence time windows.
 
     This class provides methods for creating and managing time windows
     that define when certain POI types are active and their vulnerability indices.
+    Time windows are represented as DataFrames and can be optionally saved to disk.
+
+    Attributes:
+        reference_date (datetime): Reference date for week generation.
+        schedules (dict): Dictionary mapping POI types to their schedules.
+
+    Examples:
+        >>> generator = TimeWindowGenerator(reference_date="2023-11-06")
+        >>> time_windows = generator.generate_from_schedule()
+        >>> active_windows = generator.get_active_time_windows(time_windows)
+        >>> generator.save(time_windows, path="./data/time_windows")
     """
 
     DEFAULT_SCHEDULES = {
@@ -41,12 +56,7 @@ class TimeWindowGenerator(Logger):
             {"days": "Weekdays", "start": "09:00", "end": "17:00", "vulnerability": 3},
             {"days": "Weekends", "start": "09:00", "end": "17:00", "vulnerability": 5},
         ],
-        "metro_station": [
-            {"days": "Weekdays", "start": "07:00", "end": "09:00", "vulnerability": 5},
-            {"days": "Weekdays", "start": "12:00", "end": "14:00", "vulnerability": 3},
-            {"days": "Weekdays", "start": "17:00", "end": "19:00", "vulnerability": 5},
-        ],
-        "train_station": [
+        "station": [
             {"days": "Weekdays", "start": "07:00", "end": "09:00", "vulnerability": 5},
             {"days": "Weekdays", "start": "12:00", "end": "14:00", "vulnerability": 3},
             {"days": "Weekdays", "start": "17:00", "end": "19:00", "vulnerability": 5},
@@ -68,7 +78,6 @@ class TimeWindowGenerator(Logger):
 
     def __init__(
         self,
-        output_dir=None,
         reference_date=None,
         schedules=None,
         verbose=True,
@@ -76,18 +85,16 @@ class TimeWindowGenerator(Logger):
         """
         Initialize the TimeWindowGenerator.
 
-        Args:
-            output_dir (str): Directory to store time window files
-            reference_date (datetime or str, optional): Reference date for week generation
-                                                       Default is Monday of current week
-            schedules (dict, optional): Custom POI schedules. If None, uses default
-            verbose (bool): Whether to print log messages
+        Parameters
+        ----------
+        reference_date : datetime or str, optional
+            Reference date for week generation. Default is Monday of current week.
+        schedules : dict, optional
+            Custom POI schedules. If None, uses default.
+        verbose : bool
+            Whether to print log messages.
         """
         super().__init__(verbose=verbose)
-
-        # Initialize path manager
-        self.paths = PathManager(output_dir=output_dir)
-        self.time_windows_dir = self.paths.get_path("time_windows")
 
         # Set reference date (defaults to most recent Monday)
         if reference_date is None:
@@ -111,11 +118,15 @@ class TimeWindowGenerator(Logger):
         """
         Convert datetime string to UNIX epoch timestamp.
 
-        Args:
-            date_time_str (str): Datetime string format 'YYYY-MM-DD HH:MM:SS'
+        Parameters
+        ----------
+        date_time_str : str
+            Datetime string format 'YYYY-MM-DD HH:MM:SS'
 
-        Returns:
-            int: UNIX timestamp (seconds since epoch)
+        Returns
+        -------
+        int
+            UNIX timestamp (seconds since epoch)
         """
         dt_object = datetime.strptime(date_time_str, "%Y-%m-%d %H:%M:%S")
         return int((dt_object - datetime(1970, 1, 1)).total_seconds())
@@ -125,11 +136,15 @@ class TimeWindowGenerator(Logger):
         """
         Convert UNIX timestamp to datetime string.
 
-        Args:
-            timestamp (int): UNIX epoch timestamp
+        Parameters
+        ----------
+        timestamp : int
+            UNIX epoch timestamp
 
-        Returns:
-            str: Formatted datetime string
+        Returns
+        -------
+        str
+            Formatted datetime string
         """
         dt_object = datetime(1970, 1, 1) + timedelta(seconds=timestamp)
         return dt_object.strftime("%Y-%m-%d %H:%M:%S")
@@ -139,11 +154,15 @@ class TimeWindowGenerator(Logger):
         """
         Check if the given date is a weekend.
 
-        Args:
-            date_str (str): Date string in format 'YYYY-MM-DD'
+        Parameters
+        ----------
+        date_str : str
+            Date string in format 'YYYY-MM-DD'
 
-        Returns:
-            bool: True if weekend, False otherwise
+        Returns
+        -------
+        bool
+            True if weekend, False otherwise
         """
         day = pd.to_datetime(date_str)
         return day.weekday() > 4  # 0 is Monday, 6 is Sunday
@@ -152,93 +171,83 @@ class TimeWindowGenerator(Logger):
         """
         Add days to the reference date.
 
-        Args:
-            days (int): Number of days to add
+        Parameters
+        ----------
+        days : int
+            Number of days to add
 
-        Returns:
-            str: Resulting date string in format 'YYYY-MM-DD'
+        Returns
+        -------
+        str
+            Resulting date string in format 'YYYY-MM-DD'
         """
         result_date = self.reference_date + timedelta(days=days)
         return result_date.strftime("%Y-%m-%d")
 
-    def create_time_window(
-        self, poti_type, vulnerability, start_time, end_time, replace=False
-    ):
+    def create_time_window(self, poti_type, vulnerability, start_time, end_time):
         """
         Create a single time window entry.
 
-        Args:
-            poti_type (str): POI type identifier
-            vulnerability (int): Vulnerability index (0-5)
-            start_time (str): Start time in format 'YYYY-MM-DD HH:MM:SS'
-            end_time (str): End time in format 'YYYY-MM-DD HH:MM:SS'
-            replace (bool): Whether to replace existing file
+        Parameters
+        ----------
+        poti_type : str
+            POI type identifier
+        vulnerability : int
+            Vulnerability index (0-5)
+        start_time : str
+            Start time in format 'YYYY-MM-DD HH:MM:SS'
+        end_time : str
+            End time in format 'YYYY-MM-DD HH:MM:SS'
 
-        Returns:
-            bool: True if successful, False otherwise
+        Returns
+        -------
+        dict
+            Dictionary with time window data or None if error
         """
         try:
             # Validate inputs
             if not 0 <= vulnerability <= 5:
                 self.log(
                     f"Invalid vulnerability value: {vulnerability}. Must be 0-5.",
-                    "error",
+                    level="error",
                 )
-                return False
-
-            file_path = os.path.join(self.time_windows_dir, f"{poti_type}.csv")
-            file_exists = os.path.exists(file_path)
-
-            # Determine write mode
-            mode = "w" if replace or not file_exists else "a"
+                return None
 
             # Convert times to timestamps
             start_timestamp = self.to_unix_epoch(start_time)
             end_timestamp = self.to_unix_epoch(end_time)
 
-            # Write to file
-            with open(file_path, mode, newline="") as csvfile:
-                fieldnames = ["vi", "ts", "te"]
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-
-                if not file_exists or replace:
-                    writer.writeheader()
-
-                writer.writerow(
-                    {"vi": vulnerability, "ts": start_timestamp, "te": end_timestamp}
-                )
-
-            self.log(
-                f"Added time window for {poti_type}: {start_time} to {end_time} (VI: {vulnerability})"
-            )
-            return True
+            # Return data as dictionary
+            return {
+                "poti_type": poti_type,
+                "vi": vulnerability,
+                "ts": start_timestamp,
+                "te": end_timestamp,
+                "start_time": start_time,
+                "end_time": end_time,
+            }
 
         except Exception as e:
-            self.log(f"Error creating time window: {str(e)}", "error")
-            return False
+            self.log(f"Error creating time window: {str(e)}", level="error")
+            return None
 
-    def generate_from_schedule(self, clear_existing=False):
+    def generate_from_schedule(self):
         """
         Generate time windows from predefined schedules.
 
-        Args:
-            clear_existing (bool): Whether to clear the output directory first
-
-        Returns:
-            int: Number of time windows created
+        Returns
+        -------
+        dict of pandas.DataFrame
+            Dictionary mapping POI types to their time window DataFrames
         """
-        # Clear existing files if requested
-        if clear_existing and os.path.exists(self.time_windows_dir):
-            self.log(f"Clearing existing time windows in {self.time_windows_dir}")
-            shutil.rmtree(self.time_windows_dir)
-            os.makedirs(self.time_windows_dir)
-
-        # Count created windows
-        windows_created = 0
+        # Dictionary to store time window dataframes by POI type
+        all_time_windows = {}
 
         # Generate time windows for each POI type
         for poti_type, schedules in self.schedules.items():
             self.log(f"Processing schedule for {poti_type}")
+
+            time_windows_list = []
 
             for schedule in schedules:
                 # Determine which days to add based on weekday/weekend
@@ -268,29 +277,46 @@ class TimeWindowGenerator(Logger):
                         end_time = f"{current_date} {schedule['end']}:00"
 
                     # Create the time window
-                    success = self.create_time_window(
+                    time_window = self.create_time_window(
                         poti_type=poti_type,
                         vulnerability=schedule["vulnerability"],
                         start_time=start_time,
                         end_time=end_time,
-                        replace=False,  # Append to existing file
                     )
 
-                    if success:
-                        windows_created += 1
+                    if time_window:
+                        time_windows_list.append(time_window)
 
-        self.log(f"Successfully created {windows_created} time windows")
-        return windows_created
+            # Convert list to DataFrame if we have any time windows
+            if time_windows_list:
+                all_time_windows[poti_type] = pd.DataFrame(time_windows_list)
+                self.log(
+                    f"Created {len(time_windows_list)} time windows for {poti_type}"
+                )
+            else:
+                self.log(f"No time windows generated for {poti_type}", level="warning")
 
-    def get_active_time_windows(self, timestamp=None):
+        self.log(
+            f"Successfully generated time windows for {len(all_time_windows)} POI types"
+        )
+        return all_time_windows
+
+    def get_active_time_windows(self, time_windows=None, timestamp=None):
         """
         Get all active time windows for a specific timestamp.
 
-        Args:
-            timestamp (int, optional): UNIX timestamp to check. Default is current time.
+        Parameters
+        ----------
+        time_windows : dict of pandas.DataFrame, optional
+            Dictionary mapping POI types to their time window DataFrames.
+            If None, tries to load from default locations.
+        timestamp : int, optional
+            UNIX timestamp to check. Default is current time.
 
-        Returns:
-            dict: Dictionary mapping POI types to their vulnerability indices
+        Returns
+        -------
+        dict
+            Dictionary mapping POI types to their active vulnerability indices
         """
         if timestamp is None:
             timestamp = int(datetime.now().timestamp())
@@ -298,14 +324,14 @@ class TimeWindowGenerator(Logger):
         active_windows = {}
 
         try:
-            for file in os.listdir(self.time_windows_dir):
-                if file.endswith(".csv"):
-                    poi_type = os.path.splitext(file)[0]
-                    file_path = os.path.join(self.time_windows_dir, file)
+            # If no time windows provided, return empty dict
+            if time_windows is None:
+                self.log("No time windows provided", level="warning")
+                return {}
 
-                    # Read the CSV
-                    df = pd.read_csv(file_path)
-
+            # Process each POI type's time windows
+            for poi_type, df in time_windows.items():
+                if df is not None and not df.empty:
                     # Find active windows
                     active = df[(df["ts"] <= timestamp) & (df["te"] >= timestamp)]
 
@@ -316,18 +342,133 @@ class TimeWindowGenerator(Logger):
             return active_windows
 
         except Exception as e:
-            self.log(f"Error retrieving active time windows: {str(e)}", "error")
+            self.log(f"Error retrieving active time windows: {str(e)}", level="error")
             return {}
 
-    def visualize_schedule(self, output_file="time_windows_schedule.html"):
+    def save(self, time_windows, path=None):
+        """
+        Save time windows to disk.
+
+        Parameters
+        ----------
+        time_windows : dict of pandas.DataFrame
+            Dictionary mapping POI types to their time window DataFrames
+        path : str, optional
+            Directory where time window files should be saved.
+            If None, uses "./data/time_windows".
+
+        Returns
+        -------
+        dict
+            Dictionary with paths to saved files
+        """
+        if not time_windows:
+            self.log("No time windows to save", level="warning")
+            return {}
+
+        # Set up output directory
+        if path is None:
+            time_windows_dir = os.path.abspath("./data/time_windows")
+        else:
+            time_windows_dir = os.path.abspath(path)
+
+        # Create directory if it doesn't exist
+        try:
+            os.makedirs(time_windows_dir, exist_ok=True)
+        except OSError as e:
+            self.log(
+                f"Failed to create directory {time_windows_dir}: {str(e)}",
+                level="error",
+            )
+            return {}
+
+        # Save each POI type's time windows
+        saved_files = {}
+
+        for poi_type, df in time_windows.items():
+            if df is not None and not df.empty:
+                try:
+                    # Save to CSV
+                    file_path = os.path.join(time_windows_dir, f"{poi_type}.csv")
+
+                    # Select only the columns needed for persistence
+                    save_df = df[["vi", "ts", "te"]].copy()
+                    save_df.to_csv(file_path, index=False)
+
+                    saved_files[poi_type] = file_path
+                    self.log(
+                        f"Saved {len(df)} time windows for {poi_type} to {file_path}"
+                    )
+                except Exception as e:
+                    self.log(
+                        f"Failed to save time windows for {poi_type}: {str(e)}",
+                        level="error",
+                    )
+
+        self.log(f"Saved time windows for {len(saved_files)} POI types")
+        return saved_files
+
+    def load(self, path):
+        """
+        Load time windows from disk.
+
+        Parameters
+        ----------
+        path : str
+            Directory containing time window files
+
+        Returns
+        -------
+        dict of pandas.DataFrame
+            Dictionary mapping POI types to their time window DataFrames
+        """
+        if not os.path.exists(path) or not os.path.isdir(path):
+            self.log(f"Time windows directory not found: {path}", level="error")
+            return {}
+
+        time_windows = {}
+
+        try:
+            for file_name in os.listdir(path):
+                if file_name.endswith(".csv"):
+                    poi_type = os.path.splitext(file_name)[0]
+                    file_path = os.path.join(path, file_name)
+
+                    # Read CSV file
+                    df = pd.read_csv(file_path)
+
+                    # Add human-readable time fields
+                    if "ts" in df.columns and "te" in df.columns:
+                        df["start_time"] = df["ts"].apply(self.from_unix_epoch)
+                        df["end_time"] = df["te"].apply(self.from_unix_epoch)
+                        df["poti_type"] = poi_type
+
+                        time_windows[poi_type] = df
+                        self.log(f"Loaded {len(df)} time windows for {poi_type}")
+
+            self.log(f"Loaded time windows for {len(time_windows)} POI types")
+            return time_windows
+
+        except Exception as e:
+            self.log(f"Error loading time windows: {str(e)}", level="error")
+            return {}
+
+    def visualize_schedule(self, time_windows=None, output_file=None):
         """
         Create an HTML visualization of the time window schedule.
 
-        Args:
-            output_file (str): Output HTML file path
+        Parameters
+        ----------
+        time_windows : dict of pandas.DataFrame, optional
+            Dictionary mapping POI types to their time window DataFrames.
+            If None, uses schedules directly.
+        output_file : str, optional
+            Output HTML file path. If None, returns the figure object instead.
 
-        Returns:
-            bool: True if successful, False otherwise
+        Returns
+        -------
+        plotly.graph_objects.Figure or str
+            Plotly figure object or path to saved HTML file
         """
         try:
             import plotly.figure_factory as ff
@@ -336,32 +477,51 @@ class TimeWindowGenerator(Logger):
             # Collect all time windows
             all_windows = []
 
-            # Process each POI type
-            for poti_type, schedules in self.schedules.items():
-                for schedule in schedules:
-                    # Create a task for each day type
-                    if schedule["days"] == "Weekdays":
-                        day_names = [
-                            "Monday",
-                            "Tuesday",
-                            "Wednesday",
-                            "Thursday",
-                            "Friday",
-                        ]
-                    else:
-                        day_names = ["Saturday", "Sunday"]
+            if time_windows:
+                # Use provided time windows
+                for poi_type, df in time_windows.items():
+                    for _, row in df.iterrows():
+                        # Extract day name from the start time
+                        start_dt = datetime.fromtimestamp(row["ts"])
+                        day_name = start_dt.strftime("%A")
 
-                    for day in day_names:
                         # Format for Gantt chart
                         all_windows.append(
                             {
-                                "Task": f"{poti_type} ({day})",
-                                "Start": f"2023-01-01 {schedule['start']}:00",
-                                "Finish": f"2023-01-01 {schedule['end']}:00",
-                                "Resource": f"VI: {schedule['vulnerability']}",
-                                "Description": f"{poti_type} - {day} - VI: {schedule['vulnerability']}",
+                                "Task": f"{poi_type} ({day_name})",
+                                "Start": row["start_time"],
+                                "Finish": row["end_time"],
+                                "Resource": f"VI: {int(row['vi'])}",
+                                "Description": f"{poi_type} - {day_name} - VI: {int(row['vi'])}",
                             }
                         )
+            else:
+                # Use schedules directly
+                for poti_type, schedules in self.schedules.items():
+                    for schedule in schedules:
+                        # Create a task for each day type
+                        if schedule["days"] == "Weekdays":
+                            day_names = [
+                                "Monday",
+                                "Tuesday",
+                                "Wednesday",
+                                "Thursday",
+                                "Friday",
+                            ]
+                        else:
+                            day_names = ["Saturday", "Sunday"]
+
+                        for day in day_names:
+                            # Format for Gantt chart
+                            all_windows.append(
+                                {
+                                    "Task": f"{poti_type} ({day})",
+                                    "Start": f"2023-01-01 {schedule['start']}:00",
+                                    "Finish": f"2023-01-01 {schedule['end']}:00",
+                                    "Resource": f"VI: {schedule['vulnerability']}",
+                                    "Description": f"{poti_type} - {day} - VI: {schedule['vulnerability']}",
+                                }
+                            )
 
             # Create DataFrame
             df = pd.DataFrame(all_windows)
@@ -380,17 +540,37 @@ class TimeWindowGenerator(Logger):
                 title="POI Time Windows Schedule",
             )
 
-            # Write to HTML file
-            pio.write_html(fig, os.path.join(self.time_windows_dir, output_file))
-            self.log(f"Schedule visualization saved to {output_file}")
-            return True
+            # Save or return figure
+            if output_file:
+                # Make sure directory exists
+                output_dir = os.path.dirname(os.path.abspath(output_file))
+                os.makedirs(output_dir, exist_ok=True)
+
+                # Write to HTML file
+                pio.write_html(fig, output_file)
+                self.log(f"Schedule visualization saved to {output_file}")
+                return output_file
+            else:
+                return fig
 
         except Exception as e:
-            self.log(f"Error creating visualization: {str(e)}", "error")
-            return False
+            self.log(f"Error creating visualization: {str(e)}", level="error")
+            return None
 
     def _get_vi_color(self, vulnerability):
-        """Get color based on vulnerability index"""
+        """
+        Get color based on vulnerability index.
+
+        Parameters
+        ----------
+        vulnerability : int
+            Vulnerability index (0-5)
+
+        Returns
+        -------
+        str
+            RGB color code
+        """
         colors = [
             "rgb(240,240,240)",  # 0 - Grey
             "rgb(191,255,191)",  # 1 - Light green
@@ -401,24 +581,40 @@ class TimeWindowGenerator(Logger):
         ]
         return colors[min(vulnerability, 5)]
 
-    def clear_time_windows(self):
+    @classmethod
+    def from_file(cls, path, verbose=True):
         """
-        Clear all time window files.
+        Create a generator and load time windows from existing files.
 
-        Returns:
-            bool: True if successful, False otherwise
+        Parameters
+        ----------
+        path : str
+            Directory path containing time window files
+        verbose : bool, optional
+            Whether to print log messages
+
+        Returns
+        -------
+        tuple
+            (TimeWindowGenerator instance, dict of time window DataFrames)
+
+        Raises
+        ------
+        FileNotFoundError
+            If the directory doesn't exist
+        ValueError
+            If no valid time window files are found
         """
-        try:
-            if os.path.exists(self.time_windows_dir):
-                self.log(f"Clearing all time windows in {self.time_windows_dir}")
+        if not os.path.exists(path) or not os.path.isdir(path):
+            raise FileNotFoundError(f"Time windows directory not found: {path}")
 
-                for file in os.listdir(self.time_windows_dir):
-                    if file.endswith(".csv"):
-                        os.remove(os.path.join(self.time_windows_dir, file))
+        # Create a generator with default settings
+        generator = cls(verbose=verbose)
 
-                self.log("Time windows cleared successfully")
-                return True
-            return False
-        except Exception as e:
-            self.log(f"Error clearing time windows: {str(e)}", "error")
-            return False
+        # Load the time windows
+        time_windows = generator.load(path)
+
+        if not time_windows:
+            raise ValueError(f"No valid time window files found in {path}")
+
+        return generator, time_windows
