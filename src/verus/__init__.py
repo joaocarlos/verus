@@ -14,7 +14,7 @@ __email__ = "joaocarlos@ufrb.edu.br"
 from .clustering import GeOPTICS, KMeansHaversine
 from .data import DataExtractor
 from .grid import HexagonGridGenerator
-from .verus import VulnerabilityAssessor
+from .verus import VERUS
 
 # Define public API
 __all__ = [
@@ -22,5 +22,5 @@ __all__ = [
     "GeOPTICS",
     "DataExtractor",
     "HexagonGridGenerator",
-    "VulnerabilityAssessor",
+    "VERUS",
 ]

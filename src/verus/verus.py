@@ -5,7 +5,6 @@ import numpy as np
 import pandas as pd
 from branca.colormap import linear
 from haversine import Unit, haversine
-from sklearn.neighbors import BallTree
 
 from verus.utils.logger import Logger
 
@@ -15,26 +14,23 @@ class VERUS(Logger):
     Main class for assessing urban vulnerability using POI clustering and spatial analysis.
 
     This class handles the entire vulnerability assessment workflow including:
-    - Loading POI and cluster data
-    - Processing time windows
+    - Accepting data as DataFrames or GeoDataFrames
     - Computing vulnerability levels using various distance methods
     - Visualizing and exporting results
 
     Attributes:
         place_name (str): Name of the place to analyze
-        method (str): Clustering method used (e.g., "KM-OPTICS", "AP")
+        method (str): Clustering method used (e.g., "KM-OPTICS")
         evaluation_time (str): Time scenario to evaluate
         distance_method (str): Method for calculating vulnerability based on distance
-            Options: "gaussian", "adaptive", "inverse_weighted"
+            Options: "gaussian", "inverse_weighted"
         sigma (float): Bandwidth parameter for Gaussian methods (in meters)
-        adaptive_radius (float): Radius for adaptive density calculation (in meters)
         config (dict): Configuration parameters
+        verbose (bool): Whether to print verbose logging
     """
 
-    # Available distance calculation methods
     DISTANCE_METHODS = {
         "gaussian": "_gaussian_weighted_vulnerability",
-        "adaptive": "_gaussian_weighted_vulnerability_adaptive_density",
         "inverse_weighted": "_inversely_weighted_distance",
     }
 
@@ -45,56 +41,116 @@ class VERUS(Logger):
         evaluation_time="ET4",
         distance_method="gaussian",
         sigma=1000,
-        adaptive_radius=1500,
         config=None,
+        verbose=True,  # Add verbose parameter with default value
     ):
-        """
-        Initialize the VulnerabilityAssessor with the given parameters.
-
-        Args:
-            place_name (str): Name of the place to analyze
-            method (str, optional): Clustering method. Defaults to "KM-OPTICS".
-            evaluation_time (str, optional): Time scenario. Defaults to "ET4".
-            distance_method (str, optional): Distance calculation method. Defaults to "gaussian".
-            sigma (float, optional): Bandwidth for Gaussian methods. Defaults to 1000.
-            adaptive_radius (float, optional): Radius for adaptive density. Defaults to 1500.
-            config (dict, optional): Configuration parameters. Defaults to None.
-
-        Raises:
-            ValueError: If an invalid distance_method is provided.
-        """
         super().__init__()
-
-        # Validate distance method
         if distance_method not in self.DISTANCE_METHODS:
             valid_methods = ", ".join(self.DISTANCE_METHODS.keys())
             raise ValueError(
                 f"Invalid distance method: {distance_method}. Choose from: {valid_methods}"
             )
-
-        # Initialize instance variables
         self.place_name = place_name
         self.method = method
         self.evaluation_time = evaluation_time
         self.distance_method = distance_method
         self.sigma = sigma
-        self.adaptive_radius = adaptive_radius
         self.config = config
+        self.verbose = verbose  # Initialize verbose attribute
 
-        # Data containers to be populated later
+        # Data containers (to be loaded from DataFrames)
         self.poti_df = None
         self.cluster_centers = None
         self.vulnerability_zones = None
-        self.time_windows = None
-        self.epoch_time = None
-        self.filtered_time_windows = None
 
-        # Results
+        # Results storage
         self.results = {}
 
         self.log(
             f"VulnerabilityAssessor initialized for {place_name} using {distance_method} method"
         )
+
+    def load(self, potis_df, centroids_df, zones_gdf):
+        """
+        Load POI, cluster centroids, and vulnerability zones data from DataFrames.
+
+        Args:
+            potis_df (pd.DataFrame): DataFrame with points of interest. Must contain at least "latitude", "longitude", "category" and optionally "vi" and "cluster".
+            centroids_df (pd.DataFrame): DataFrame with cluster centroids. Must contain "latitude" and "longitude".
+            zones_gdf (GeoDataFrame): GeoDataFrame with vulnerability zones geometry.
+
+        Returns:
+            self: For method chaining
+
+        Raises:
+            ValueError: If required columns are missing.
+        """
+        # Validate POTIs DataFrame
+        required_poti_columns = ["latitude", "longitude", "category"]
+        missing_columns = [
+            col for col in required_poti_columns if col not in potis_df.columns
+        ]
+        if missing_columns:
+            self.log(
+                f"POTI DataFrame missing required columns: {', '.join(missing_columns)}",
+                level="error",
+            )
+            raise ValueError(
+                f"POTI DataFrame missing required columns: {', '.join(missing_columns)}"
+            )
+        self.poti_df = potis_df.copy()
+
+        # Ensure vulnerability index column exists
+        if "vi" not in self.poti_df.columns:
+            self.log(
+                "POTI DataFrame doesn't have 'vi' column. Using default vi=1.",
+                level="warning",
+            )
+            self.poti_df["vi"] = 1.0
+
+        # Set default cluster if not present
+        if "cluster" not in self.poti_df.columns:
+            self.log(
+                "POTI DataFrame doesn't have 'cluster' column. Setting all to 0.",
+                level="warning",
+            )
+            self.poti_df["cluster"] = 0
+
+        # Validate centroids DataFrame
+        required_centroid_columns = ["latitude", "longitude"]
+        missing_columns = [
+            col for col in required_centroid_columns if col not in centroids_df.columns
+        ]
+        if missing_columns:
+            self.log(
+                f"Centroids DataFrame missing required columns: {', '.join(missing_columns)}",
+                level="error",
+            )
+            raise ValueError(
+                f"Centroids DataFrame missing required columns: {', '.join(missing_columns)}"
+            )
+        self.cluster_centers = centroids_df.copy()
+
+        # Validate vulnerability zones GeoDataFrame
+        if not isinstance(zones_gdf, gpd.GeoDataFrame):
+            self.log("Input zones data must be a GeoDataFrame", level="error")
+            raise ValueError("Zones data must be a GeoDataFrame")
+        self.vulnerability_zones = zones_gdf.copy()
+        if not all(self.vulnerability_zones.geometry.is_valid):
+            self.log("Vulnerability zones contain invalid geometries", level="error")
+            raise ValueError("Vulnerability zones contain invalid geometries")
+
+        # Log summary info
+        n_clusters = len(np.unique(self.poti_df["cluster"]))
+        self.log(
+            f"Loaded {len(self.poti_df)} POTIs across {n_clusters} clusters",
+            level="success",
+        )
+        self.log(
+            f"Loaded {len(self.vulnerability_zones)} vulnerability zones", level="info"
+        )
+
+        return self
 
     def _gaussian_weighted_vulnerability(self, x_c_z, y_c_z, potis):
         """
@@ -135,89 +191,6 @@ class VERUS(Logger):
 
         # Normalize by the sum of influences to obtain the vulnerability level
         VL = gaussian_kernel_sum / (n * self.sigma * np.sqrt(2 * np.pi))
-        return VL
-
-    def _gaussian_weighted_vulnerability_adaptive_density(self, x_c_z, y_c_z, potis):
-        """
-        Calculate the vulnerability level (VL) using a Gaussian approach with adaptive bandwidth
-        based on local point density.
-
-        Parameters:
-            x_c_z: latitude of the zone center
-            y_c_z: longitude of the zone center
-            potis: DataFrame with points of interest (latitude, longitude, vi)
-
-        Returns:
-            Vulnerability level (VL) of the zone
-        """
-        # Reset index to ensure indices align with sigmas
-        potis = potis.reset_index(drop=True)
-
-        # Prepare PoTI coordinates
-        poti_coords = potis[["latitude", "longitude"]].to_numpy()
-        n = len(poti_coords)
-
-        if n == 0:
-            return 0
-
-        # Check if 'vi' column exists, add default if not
-        if "vi" not in potis.columns:
-            self.log(
-                "POTIs DataFrame doesn't have 'vi' column. Using default vi=1.",
-                level="warning",
-            )
-            potis["vi"] = 1.0
-
-        # Earth's radius in meters
-        earth_radius = 6371000
-
-        # Convert degrees to radians for haversine metric
-        poti_coords_rad = np.radians(poti_coords)
-
-        # Build a BallTree for efficient neighbor queries
-        tree = BallTree(poti_coords_rad, metric="haversine")
-
-        # Compute local point density for each PoI
-        densities = []
-        for coord in poti_coords_rad:
-            # Find neighbors within the given radius (convert radius to radians)
-            indices = tree.query_radius([coord], r=self.adaptive_radius / earth_radius)
-            local_density = len(indices[0]) - 1  # Subtract the point itself
-            densities.append(local_density)
-
-        densities = np.array(densities)
-
-        # Prevent division by zero
-        epsilon = 1e-6
-
-        # Calculate adaptive sigma as inversely proportional to local density
-        sigmas = 1 / (densities + epsilon)
-
-        # Normalize sigmas to have a reasonable scale
-        sigmas = sigmas / sigmas.max() * self.adaptive_radius
-
-        # Compute vulnerability level
-        gaussian_kernel_sum = 0
-
-        for idx, row in potis.iterrows():
-            sigma = sigmas[idx]
-            sigma = max(sigma, 1e-6)  # Ensure sigma is positive
-
-            # Calculate the distance in meters to the zone center
-            distance = haversine(
-                (x_c_z, y_c_z), (row["latitude"], row["longitude"]), unit=Unit.METERS
-            )
-
-            # Calculate the Gaussian influence
-            influence = row["vi"] * np.exp(-0.5 * (distance / sigma) ** 2)
-            gaussian_kernel_sum += influence
-
-        # Average sigma for normalization
-        avg_sigma = sigmas.mean() if len(sigmas) > 0 else self.adaptive_radius
-
-        # Normalize to obtain the vulnerability level
-        VL = gaussian_kernel_sum / (n * avg_sigma * np.sqrt(2 * np.pi))
-
         return VL
 
     def _inversely_weighted_distance(self, x_c_z, y_c_z, potis):
@@ -410,182 +383,18 @@ class VERUS(Logger):
         # Call the method with the provided parameters
         return method(x_c_z, y_c_z, potis)
 
-    def load(
-        self,
-        poti_file,
-        centroids_file,
-        zones_file,
-        time_windows_dir,
-    ):
-        """
-        Load POI and cluster data from explicitly provided files.
-
-        Args:
-            poti_file (str): Full path to the POI cluster file
-            centroids_file (str): Full path to the centroids file
-            zones_file (str): Full path to the vulnerability zones geojson file
-            time_windows_dir (str): Directory containing time window files
-
-        Returns:
-            self: For method chaining
-
-        Raises:
-            FileNotFoundError: If required files are not found
-            ValueError: If files don't have the required columns
-        """
-        # Load POI cluster data
-        if not os.path.exists(poti_file):
-            self.log(f"POI cluster file not found: {poti_file}", level="error")
-            raise FileNotFoundError(f"POI cluster file not found: {poti_file}")
-
-        if not os.path.exists(centroids_file):
-            self.log(
-                f"Cluster centroids file not found: {centroids_file}", level="error"
-            )
-            raise FileNotFoundError(
-                f"Cluster centroids file not found: {centroids_file}"
-            )
-
-        # Load POI data
-        self.poti_df = pd.read_csv(poti_file, index_col=False)
-
-        # Check for required columns and handle missing columns
-        required_poti_columns = ["latitude", "longitude", "category"]
-        missing_columns = [
-            col for col in required_poti_columns if col not in self.poti_df.columns
-        ]
-        if missing_columns:
-            self.log(
-                f"POI file missing required columns: {', '.join(missing_columns)}",
-                level="error",
-            )
-            raise ValueError(
-                f"POI file missing required columns: {', '.join(missing_columns)}"
-            )
-
-        # Check if cluster column exists, add default if not
-        if "cluster" not in self.poti_df.columns:
-            self.log(
-                "POI file doesn't have 'cluster' column. Adding default cluster 0.",
-                level="warning",
-            )
-            self.poti_df["cluster"] = 0
-
-        # Load centroids data
-        self.cluster_centers = pd.read_csv(centroids_file, index_col=False)
-        required_centroid_columns = ["latitude", "longitude"]
-        missing_columns = [
-            col
-            for col in required_centroid_columns
-            if col not in self.cluster_centers.columns
-        ]
-        if missing_columns:
-            self.log(
-                f"Centroids file missing required columns: {', '.join(missing_columns)}",
-                level="error",
-            )
-            raise ValueError(
-                f"Centroids file missing required columns: {', '.join(missing_columns)}"
-            )
-
-        # Load time windows
-        if not os.path.exists(time_windows_dir):
-            self.log(
-                f"Time windows directory not found: {time_windows_dir}", level="error"
-            )
-            raise FileNotFoundError(
-                f"Time windows directory not found: {time_windows_dir}"
-            )
-
-        time_windows_df = []
-        for file in os.listdir(time_windows_dir):
-            if file.endswith(".csv"):
-                try:
-                    time_window = pd.read_csv(os.path.join(time_windows_dir, file))
-                    # Validate time window columns
-                    required_tw_columns = ["ts", "te", "vi"]
-                    missing_columns = [
-                        col
-                        for col in required_tw_columns
-                        if col not in time_window.columns
-                    ]
-                    if missing_columns:
-                        self.log(
-                            f"Time window file {file} missing required columns: {', '.join(missing_columns)}. Skipping.",
-                            level="warning",
-                        )
-                        continue
-
-                    time_window["category"] = os.path.splitext(file)[0]
-                    time_windows_df.append(time_window)
-                except Exception as e:
-                    self.log(
-                        f"Error loading time window file {file}: {str(e)}",
-                        level="warning",
-                    )
-                    continue
-
-        if not time_windows_df:
-            self.log(
-                f"No valid time window files found in: {time_windows_dir}",
-                level="error",
-            )
-            raise FileNotFoundError(
-                f"No valid time window files found in: {time_windows_dir}"
-            )
-
-        self.time_windows = pd.concat(time_windows_df, ignore_index=True)
-
-        # Load vulnerability zones geometry
-        if not os.path.exists(zones_file):
-            self.log(f"Vulnerability zones file not found: {zones_file}", level="error")
-            raise FileNotFoundError(f"Vulnerability zones file not found: {zones_file}")
-
-        try:
-            self.vulnerability_zones = gpd.read_file(zones_file)
-            # Check if the GeoDataFrame has valid geometry
-            if not all(self.vulnerability_zones.geometry.is_valid):
-                self.log(
-                    "Vulnerability zones file contains invalid geometries",
-                    level="error",
-                )
-                raise ValueError("Vulnerability zones file contains invalid geometries")
-        except Exception as e:
-            self.log(f"Error loading vulnerability zones file: {str(e)}", level="error")
-            raise ValueError(f"Error loading vulnerability zones file: {str(e)}")
-
-        # Get unique clusters (safely handling the case where it might be a new column)
-        n_clusters = 1
-        if "cluster" in self.poti_df.columns:
-            n_clusters = len(np.unique(self.poti_df["cluster"]))
-
-        # Log summary info
-        self.log(
-            f"Loaded {len(self.poti_df)} POTIs across {n_clusters} clusters",
-            level="success",
-        )
-        self.log(
-            f"Loaded {len(self.vulnerability_zones)} vulnerability zones", level="info"
-        )
-        self.log(f"Loaded {len(self.time_windows)} time window entries", level="info")
-
-        return self
-
     def calculate_vulnerability_zones(self):
         """
-        Calculate vulnerability for each zone based on the nearest cluster's POIs.
+        Calculate vulnerability for each zone based on the nearest cluster's POTIs.
+        Assumes the 'vi' values are already present in the POTI DataFrame.
 
         Returns:
             self: For method chaining
 
         Raises:
-            ValueError: If required data has not been loaded
+            ValueError: If required data has not been loaded.
         """
-        if (
-            self.poti_df is None
-            or self.cluster_centers is None
-            or self.vulnerability_zones is None
-        ):
+        if self.poti_df is None or self.vulnerability_zones is None:
             self.log(
                 "Data must be loaded before calculating vulnerability zones",
                 level="error",
@@ -594,12 +403,9 @@ class VERUS(Logger):
                 "Data must be loaded before calculating vulnerability zones."
             )
 
-        # Make a copy of vulnerability zones to avoid modifying the original
         zones = self.vulnerability_zones.copy()
-
         self.log("Assigning zones to nearest clusters...", level="info")
 
-        # Find the nearest cluster for each vulnerability zone
         zones["cluster"] = zones.apply(
             lambda x: self._nearest_cluster(
                 x["geometry"].centroid.y,
@@ -614,8 +420,6 @@ class VERUS(Logger):
             f"Calculating vulnerability using {self.distance_method} method...",
             level="info",
         )
-
-        # Compute the vulnerability level for each zone using the selected distance method
         zones["value"] = zones.apply(
             lambda x: self.calculate_vulnerability(
                 x["geometry"].centroid.y,
@@ -625,10 +429,7 @@ class VERUS(Logger):
             axis=1,
         )
 
-        # Normalize the vulnerability levels
         min_vl = zones["value"].min()
-
-        # Use max vulnerability from config if available, otherwise use the maximum value
         if (
             self.config
             and hasattr(self.config, "max_vulnerability")
@@ -641,20 +442,16 @@ class VERUS(Logger):
             self.log(f"Using calculated max vulnerability: {max_vl}", level="info")
 
         self.log(f"Min VL: {min_vl}, Max VL: {max_vl}", level="info")
-
-        # Normalize values between 0 and 1
         zones["VL_normalized"] = zones["value"].apply(
             lambda x: (x - min_vl) / (max_vl - min_vl) if max_vl > min_vl else 0.5
         )
 
-        # Update the vulnerability zones
         self.vulnerability_zones = zones
         self.results["vulnerability_zones"] = zones
 
         self.log(f"Vulnerability calculated for {len(zones)} zones", level="success")
         self.log("Vulnerability statistics:", level="info")
         self.log(str(zones["VL_normalized"].describe()), level="info")
-
         return self
 
     def smooth_vulnerability(self, influence_threshold=0.3):
@@ -786,10 +583,10 @@ class VERUS(Logger):
         Raises:
             ValueError: If vulnerability has not been calculated
         """
-        # To be implemented
-        pass
+        # Use the existing _create_interactive_map method
+        return self._create_interactive_map(output_file)
 
-    def export_results(self, output_dir=None):
+    def save(self, output_dir=None):
         """
         Export results to files.
 
@@ -799,181 +596,310 @@ class VERUS(Logger):
         Returns:
             self: For method chaining
         """
-        # To be implemented
-        pass
-
-    def run(
-        self,
-        evaluation_time=None,
-        save_output=True,
-        output_dir=None,
-        run_clustering=True,
-        optics_params=None,
-        kmeans_params=None,
-    ):
-        """
-        Run the vulnerability assessment workflow.
-
-        Args:
-            evaluation_time (str, optional): Time scenario to evaluate. If None, uses the one set during initialization.
-            save_output (bool, optional): Whether to save results to files. Defaults to True.
-            output_dir (str, optional): Directory to save output files. If None, uses "./results/{place_name}/".
-            run_clustering (bool, optional): Whether to run OPTICS+KMeans clustering. Defaults to True.
-            optics_params (dict, optional): Parameters for OPTICS clustering algorithm.
-            kmeans_params (dict, optional): Parameters for K-means clustering algorithm.
-
-        Returns:
-            dict: Results dictionary containing:
-                - vulnerability_zones: GeoDataFrame with vulnerability assessment
-                - potis: DataFrame with points of interest
-                - clusters: DataFrame with cluster centers
-                - epoch_time: Epoch time used for evaluation
-
-        Raises:
-            ValueError: If required data has not been loaded
-        """
-        # Check if data is loaded
-        if (
-            self.poti_df is None
-            or self.time_windows is None
-            or self.vulnerability_zones is None
-        ):
-            self.log(
-                "Data must be loaded before running vulnerability assessment",
-                level="error",
-            )
-            raise ValueError(
-                "Data must be loaded before running vulnerability assessment."
-            )
-
-        # Update evaluation time if provided
-        if evaluation_time is not None:
-            self.log(f"Updating evaluation time to {evaluation_time}", level="info")
-            self.evaluation_time = evaluation_time
-
-        # Set default output directory if not provided
         if output_dir is None:
             output_dir = f"./results/{self.place_name}/"
 
         os.makedirs(output_dir, exist_ok=True)
 
-        # Run clustering if requested
-        if run_clustering:
-            self.log("Running clustering pipeline (OPTICS + KMeans)", level="info")
-
-            # Import clustering modules
-            from verus.clustering import GeOPTICS, KMeansHaversine
-
-            # Default OPTICS parameters if not provided
-            if optics_params is None:
-                optics_params = {"min_samples": 5, "xi": 0.05, "verbose": True}
-
-            # Run OPTICS
-            self.log("Running OPTICS clustering...", level="info")
-            optics = GeOPTICS(**optics_params, output_dir=output_dir)
-            optics_results = optics.run(
-                data_source=self.poti_df,
-                place_name=self.place_name,
-                time_windows_path=None,  # We already have time windows loaded
-                evaluation_time=self.evaluation_time,
-                save_output=False,
+        # Save vulnerability zones
+        if self.vulnerability_zones is not None:
+            vz_path = os.path.join(
+                output_dir, f"{self.place_name}_vulnerability_zones.geojson"
             )
+            self.vulnerability_zones.to_file(vz_path, driver="GeoJSON")
+            self.log(f"Vulnerability zones saved to {vz_path}", level="success")
 
-            # Prepare KMeans parameters
-            if kmeans_params is None:
-                kmeans_params = {}
+            # Also save as CSV for easier analysis
+            csv_path = os.path.join(
+                output_dir, f"{self.place_name}_vulnerability_zones.csv"
+            )
+            # Save only non-geometry columns to CSV
+            non_geom_cols = [
+                col for col in self.vulnerability_zones.columns if col != "geometry"
+            ]
+            self.vulnerability_zones[non_geom_cols].to_csv(csv_path, index=False)
+            self.log(f"Vulnerability data saved to {csv_path}", level="success")
 
-            # Check if OPTICS was successful
-            if (
-                optics_results["centroids"] is None
-                or len(optics_results["centroids"]) < 2
-            ):
-                self.log(
-                    "OPTICS clustering failed or returned too few clusters. Using default KMeans.",
-                    level="warning",
-                )
+        # Save POTI data with cluster assignments
+        if self.poti_df is not None:
+            poti_path = os.path.join(
+                output_dir, f"{self.place_name}_poti_clustered.csv"
+            )
+            self.poti_df.to_csv(poti_path, index=False)
+            self.log(f"Clustered POTIs saved to {poti_path}", level="success")
 
-                # Set default number of clusters if not specified
-                if "n_clusters" not in kmeans_params:
-                    kmeans_params["n_clusters"] = 8
+        # Save cluster centers
+        if self.cluster_centers is not None:
+            centers_path = os.path.join(
+                output_dir, f"{self.place_name}_cluster_centers.csv"
+            )
+            self.cluster_centers.to_csv(centers_path, index=False)
+            self.log(f"Cluster centers saved to {centers_path}", level="success")
 
-                # Set default initialization method if not specified
-                if "init" not in kmeans_params:
-                    kmeans_params["init"] = "k-means++"
+        return self
 
-                # Run standard KMeans without predefined centers
-                kmeans = KMeansHaversine(**kmeans_params, output_dir=output_dir)
-                kmeans_results = kmeans.run(
-                    data_source=self.poti_df,
-                    place_name=self.place_name,
-                    evaluation_time=self.evaluation_time,
-                    save_output=False,
-                    algorithm_suffix="KM-Standard",
-                )
+    def _run_clustering_pipeline(self, df, evaluation_time):
+        """
+        Run a clustering pipeline that first obtains clustering centers via OPTICS
+        and then initializes KMeans with those centers.
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            DataFrame with POTI data (including 'vi').
+        evaluation_time : str or int
+            Evaluation time identifier (used for naming but not passed to clustering methods).
+
+        Returns
+        -------
+        dict
+            Dictionary of clustering results.
+        """
+        from verus.clustering.kmeans import KMeansHaversine
+        from verus.clustering.optics import GeOPTICS
+
+        # Run OPTICS to obtain centers
+        self.log("Running OPTICS clustering to obtain centres...", level="info")
+        optics = GeOPTICS(
+            min_samples=5, xi=0.05, min_cluster_size=5, verbose=self.verbose
+        )
+        optics_results = optics.run(
+            data_source=df, area_boundary_path=None  # Not needed here
+        )
+
+        # Check if OPTICS produced enough centroids
+        if (
+            optics_results["centroids"] is not None
+            and len(optics_results["centroids"]) > 1
+        ):
+            centers = optics_results["centroids"]
+            self.log(f"Running KMeans with {len(centers)} OPTICS centres", level="info")
+            kmeans = KMeansHaversine(
+                n_clusters=len(centers),
+                init="predefined",
+                random_state=42,
+                verbose=self.verbose,
+                predefined_centers=centers,
+            )
+            # FIXED: Remove all problematic parameters (evaluation_time, save_output)
+            # Only pass what's needed
+            kmeans_results = kmeans.run(
+                data_source=df,
+                centers_input=centers,
+            )
+            # Add suffix information after the fact
+            kmeans_results["algorithm_suffix"] = f"KM-OPTICS_{evaluation_time}"
+        else:
+            # Fallback on default KMeans
+            self.log(
+                "OPTICS returned insufficient centres → defaulting to standard KMeans",
+                level="warning",
+            )
+            kmeans = KMeansHaversine(
+                n_clusters=8, init="k-means++", verbose=self.verbose, random_state=42
+            )
+            # FIXED: Remove all problematic parameters
+            kmeans_results = kmeans.run(
+                data_source=df,
+            )
+            # Add suffix information after the fact
+            kmeans_results["algorithm_suffix"] = f"KM-Standard_{evaluation_time}"
+
+        # Add evaluation_time to results directly
+        kmeans_results["evaluation_time"] = evaluation_time
+        return kmeans_results
+
+    def create_map(self, clusters, centroids, area_boundary_path):
+        """
+        Create an interactive map with vulnerability zones and clusters.
+
+        Args:
+            clusters (pd.DataFrame): DataFrame with cluster assignments
+            centroids (pd.DataFrame): DataFrame with cluster centroids
+            area_boundary_path (str): Path to GeoJSON with area boundary
+
+        Returns:
+            folium.Map: Interactive map object
+        """
+        # Redirect to the existing implementation
+        return self._create_interactive_map(area_boundary_path)
+
+    def _extract_place_name(self, data_source):
+        """
+        Extract place name from data source or return the configured place name.
+
+        Args:
+            data_source: Source of data (DataFrame or path)
+
+        Returns:
+            str: Extracted place name
+        """
+        # If data_source is a DataFrame, just return the configured place_name
+        if isinstance(data_source, (pd.DataFrame, gpd.GeoDataFrame)):
+            return self.place_name
+
+        # If it's a string (file path), try to extract place name from it
+        elif isinstance(data_source, str):
+            try:
+                basename = os.path.basename(data_source)
+                # Try to extract place name from file name (before first underscore)
+                place = basename.split("_")[0]
+                if place:
+                    return place
+            except (IndexError, AttributeError):
+                pass
+
+        # Default to configured place_name
+        return self.place_name
+
+    def run(
+        self,
+        data_source,
+        time_windows=None,
+        centers_input=None,
+        area_boundary_path=None,
+    ):
+        """
+        Run the complete vulnerability assessment workflow.
+
+        This method first updates the POTI DataFrame based on external time window data
+        (if provided) to set the appropriate vulnerability index (vi). Then, it executes
+        the clustering pipeline (using OPTICS to determine centres and initializing KMeans
+        with those centres), computes vulnerability zones, applies smoothing and optionally
+        creates a map visualization.
+
+        Args:
+            data_source: POTI DataFrame or path to POTI data
+            time_windows: Optional dictionary or DataFrame with time window data
+            centers_input: Optional predefined centers for clustering
+            area_boundary_path: Optional path to boundary GeoJSON for visualization
+
+        Returns:
+            dict: Dictionary with results of the vulnerability assessment
+        """
+        try:
+            # Extract place name from data source if possible
+            place_name = self._extract_place_name(data_source)
+
+            # Use the already loaded data or load it if a string path is provided
+            if isinstance(data_source, str) and self.poti_df is None:
+                # If data_source is a file path and data isn't loaded yet, load it
+                self.log(f"Loading data from {data_source}", level="info")
+                # This would require implementing a load_from_file method, which isn't shown here
+                # For now, just use pandas/geopandas directly
+                if data_source.endswith(".csv"):
+                    df = pd.read_csv(data_source)
+                elif data_source.endswith((".geojson", ".shp")):
+                    df = gpd.read_file(data_source)
+                else:
+                    raise ValueError(f"Unsupported file format for {data_source}")
+            elif isinstance(data_source, (pd.DataFrame, gpd.GeoDataFrame)):
+                # If data_source is already a DataFrame, use it directly
+                df = data_source.copy()
             else:
-                # Run KMeans with OPTICS centers
+                # Use the already loaded data
+                df = self.poti_df.copy() if self.poti_df is not None else None
+
+            if df is None:
+                raise ValueError(
+                    "No data source provided and no data previously loaded"
+                )
+
+            # Ensure 'vi' column exists with default value 1.0 if missing
+            if "vi" not in df.columns:
+                self.log("Adding default vulnerability index (vi=1.0)", level="info")
+                df["vi"] = 1.0
+
+            # --- Update vulnerability index based on external time window data ---
+            if time_windows is not None:
                 self.log(
-                    f"Running KMeans with {len(optics_results['centroids'])} OPTICS centers...",
+                    "Updating vulnerability index using external time window data...",
                     level="info",
                 )
+                if isinstance(time_windows, dict):
+                    dfs = []
+                    for category, tw_df in time_windows.items():
+                        sub_df = df[df["category"] == category].copy()
+                        if not sub_df.empty:
+                            sub_df["vi"] = tw_df["vi"].iloc[0]
+                            dfs.append(sub_df)
+                    if dfs:
+                        df = pd.concat(dfs, ignore_index=True)
+                    else:
+                        self.log(
+                            "No matching categories found in time windows; using original vi values.",
+                            level="warning",
+                        )
+                elif isinstance(time_windows, pd.DataFrame):
+                    if (
+                        "category" in time_windows.columns
+                        and "vi" in time_windows.columns
+                    ):
+                        temp = time_windows[["category", "vi"]].drop_duplicates()
+                        df = df.merge(
+                            temp, on="category", how="left", suffixes=("", "_tw")
+                        )
+                        df["vi"] = df["vi_tw"].fillna(df["vi"])
+                        df.drop(columns=["vi_tw"], inplace=True)
+                    else:
+                        self.log(
+                            "Time windows DataFrame must have 'category' and 'vi' columns.",
+                            level="error",
+                        )
+                        raise ValueError("Invalid time windows DataFrame format.")
+                else:
+                    self.log(
+                        "time_windows must be a dict or a DataFrame.", level="error"
+                    )
+                    raise ValueError("Invalid type for time_windows parameter.")
 
-                # Set n_clusters to match OPTICS centroids count if not explicitly specified
-                if "n_clusters" not in kmeans_params:
-                    kmeans_params["n_clusters"] = len(optics_results["centroids"])
+            # --- Execute the clustering pipeline (OPTICS -> KMeans) ---
+            output_dir = f"./results/{place_name}/"
+            clusters_results = self._run_clustering_pipeline(df, self.evaluation_time)
 
-                kmeans = KMeansHaversine(**kmeans_params, output_dir=output_dir)
-                kmeans_results = kmeans.run(
-                    data_source=self.poti_df,
-                    place_name=self.place_name,
-                    evaluation_time=self.evaluation_time,
-                    centers_input=optics_results[
-                        "centroids"
-                    ],  # Always use OPTICS centroids when available
-                    save_output=False,
-                    algorithm_suffix="KM-OPTICS",
-                )
+            # Update internal state with clustering results
+            self.poti_df = clusters_results.get("input_data", df)
+            # Fix: Use "centroids" key instead of "clusters"
+            self.cluster_centers = clusters_results.get("centroids", None)
 
-            # Update POTIs and centroids from KMeans results
-            self.log("Updating POI data with clustering results", level="info")
-            self.poti_df = kmeans_results["poti_df"]
-            self.cluster_centers = kmeans_results["clusters"]
+            # Proceed to calculate vulnerability zones based on updated poti_df
+            self.calculate_vulnerability_zones()
+            self.smooth_vulnerability()
 
-        # Calculate vulnerability zones
-        self.log(
-            f"Calculating vulnerability using {self.distance_method} method",
-            level="info",
-        )
-        self.calculate_vulnerability_zones()
+            map_obj = None
+            if area_boundary_path and self.poti_df is not None:
+                # Use the _create_interactive_map method directly
+                map_obj = self._create_interactive_map(area_boundary_path)
 
-        # Apply smoothing
-        self.log("Applying smoothing across cluster boundaries", level="info")
-        self.smooth_vulnerability()
+            return {
+                "clusters": clusters_results.get("clusters"),
+                "centroids": clusters_results.get("centroids"),
+                "map": map_obj,
+                "input_data": self.poti_df,
+                "place_name": place_name,
+                "labels": clusters_results.get("labels"),
+                "inertia": clusters_results.get("inertia"),
+                "n_iter": clusters_results.get("n_iter"),
+                "vulnerability_zones": self.vulnerability_zones,  # Ensure this key is present
+            }
 
-        # Save results if requested
-        if save_output:
-            # Save vulnerability zones
-            output_geojson = os.path.join(
-                output_dir,
-                f"{self.place_name}_vulnerability_zones_{self.distance_method}_{self.evaluation_time}.geojson",
-            )
-            self.vulnerability_zones.to_file(output_geojson, driver="GeoJSON")
-            self.log(f"Saved vulnerability zones to {output_geojson}", level="success")
+        except Exception as e:
+            import traceback
 
-            # Create and save visualization
-            output_html = os.path.join(
-                output_dir,
-                f"{self.place_name}_vulnerability_map_{self.distance_method}_{self.evaluation_time}.html",
-            )
-            self._create_interactive_map(output_html)
-            self.log(f"Saved interactive map to {output_html}", level="success")
-
-        # Return results
-        return {
-            "vulnerability_zones": self.vulnerability_zones,
-            "potis": self.poti_df,
-            "clusters": self.cluster_centers,
-            "epoch_time": self.epoch_time,
-        }
+            self.log(f"Error in vulnerability assessment workflow: {e}", "error")
+            self.log(traceback.format_exc(), "error")  # Print stack trace for debugging
+            return {
+                "clusters": None,
+                "centroids": None,
+                "map": None,
+                "input_data": None,
+                "place_name": None,
+                "labels": None,
+                "inertia": None,
+                "n_iter": None,
+                "vulnerability_zones": None,
+                "error": str(e),  # Include error message in results
+            }
 
     def _create_interactive_map(self, output_file=None):
         """
