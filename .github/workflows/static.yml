@@ -63,16 +63,16 @@ jobs:
                       echo "Fixing conf.py by removing problematic extensions"
                       # Create a simplified conf.py
                       echo 'project = "VERUS"' > docs/source/conf.py
-                      echo 'copyright = "2025, VERUS Team"' >> docs/source/conf.py
-                      echo 'author = "VERUS Team"' >> docs/source/conf.py
+                      echo 'copyright = "2025, LES2 Team"' >> docs/source/conf.py
+                      echo 'author = "oão Carlos N. Bittencourt"' >> docs/source/conf.py
                       echo 'extensions = ["sphinx.ext.autodoc", "sphinx.ext.viewcode"]' >> docs/source/conf.py
                       echo 'html_theme = "sphinx_rtd_theme"' >> docs/source/conf.py
                     fi
                   else
                     # Create minimal conf.py if it doesn't exist
                     echo 'project = "VERUS"' > docs/source/conf.py
-                    echo 'copyright = "2025, VERUS Team"' >> docs/source/conf.py
-                    echo 'author = "VERUS Team"' >> docs/source/conf.py
+                    echo 'copyright = "2025, LES2 Team"' >> docs/source/conf.py
+                    echo 'author = "João Carlos N. Bittencourt"' >> docs/source/conf.py
                     echo 'extensions = ["sphinx.ext.autodoc", "sphinx.ext.viewcode"]' >> docs/source/conf.py
                     echo 'html_theme = "sphinx_rtd_theme"' >> docs/source/conf.py
                   fi
