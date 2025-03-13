@@ -47,7 +47,7 @@ if __name__ == "__main__":
     # Create and save a map if data was retrieved
     if len(df) > 0:
         logger.log("Creating map visualization...", level="info")
-        map_obj = extractor.create_map(df)
+        map_obj = extractor.view(df)
         if map_obj:
             # Save to the maps directory
             maps_dir = os.path.join(base_dir, "maps")

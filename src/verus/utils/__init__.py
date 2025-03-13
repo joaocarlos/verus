@@ -8,10 +8,10 @@ that support the main functionality of the project.
 
 # Import main classes to make them available directly from the package
 from .logger import Logger
-from .timer import TimeoutException, with_timeout
+from .timer import TimeoutException, Timer, with_timeout
 
 # Define what symbols are exported when using "from verus.utils import *"
-__all__ = ["Logger", "TimeoutException", "with_timeout"]
+__all__ = ["Logger", "TimeoutException", "Timer", "with_timeout"]
 
 # Import version info from main package
 try:

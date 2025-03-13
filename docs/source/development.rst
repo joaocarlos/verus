@@ -2,7 +2,7 @@ Development
 ===========
 
 Contributing to VERUS
-=====================
+---------------------
 
 Contributions to VERUS are welcome! Here's how to contribute:
 
@@ -13,7 +13,7 @@ Contributions to VERUS are welcome! Here's how to contribute:
 5. Submit a pull request
 
 Code Style
-==========
+----------
 
 VERUS follows the PEP 8 style guide. Please ensure your code complies with these standards.
 
@@ -24,26 +24,22 @@ We recommend using tools such as:
 - isort for import sorting
 
 Testing
-=======
+-------
 
-VERUS uses pytest for testing. To run tests:
-
-.. code-block:: bash
-
-    pytest
+VERUS uses simple tests to ensure the code is working as expected. To run the tests, follow the `test folder <https://github.com/joaocarlos/verus/tree/main/tests>`_.
 
 Documentation
-=============
+-------------
 
-Documentation is built using Sphinx. To build the documentation:
+Ensure that all public functions and classes are well documented. Documentation is built using Sphinx. To build the documentation:
 
 .. code-block:: bash
 
     cd docs
-    make html
+    ./build_docs.sh
 
 Release Process
-===============
+---------------
 
 1. Update version in `src/verus/__init__.py`
 2. Update CHANGELOG.md

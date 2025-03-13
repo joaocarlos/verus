@@ -34,45 +34,154 @@ class TimeWindowGenerator(Logger):
 
     DEFAULT_SCHEDULES = {
         "hospital": [
-            {"days": "Weekdays", "start": "07:00", "end": "10:00", "vulnerability": 5},
-            {"days": "Weekdays", "start": "10:00", "end": "16:00", "vulnerability": 2},
-            {"days": "Weekdays", "start": "16:00", "end": "19:00", "vulnerability": 5},
-            {"days": "Weekends", "start": "00:00", "end": "23:59", "vulnerability": 1},
+            {
+                "days": "Weekdays",
+                "start": "07:00",
+                "end": "10:00",
+                "vulnerability": 0.8,
+            },
+            {
+                "days": "Weekdays",
+                "start": "10:00",
+                "end": "16:00",
+                "vulnerability": 0.4,
+            },
+            {
+                "days": "Weekdays",
+                "start": "16:00",
+                "end": "19:00",
+                "vulnerability": 0.8,
+            },
+            {
+                "days": "Weekends",
+                "start": "00:00",
+                "end": "23:59",
+                "vulnerability": 0.2,
+            },
         ],
         "park": [
-            {"days": "Weekdays", "start": "16:00", "end": "20:00", "vulnerability": 2},
-            {"days": "Weekends", "start": "08:00", "end": "18:00", "vulnerability": 3},
+            {
+                "days": "Weekdays",
+                "start": "16:00",
+                "end": "20:00",
+                "vulnerability": 0.2,
+            },
+            {
+                "days": "Weekends",
+                "start": "08:00",
+                "end": "18:00",
+                "vulnerability": 0.4,
+            },
         ],
         "mall": [
-            {"days": "Weekdays", "start": "12:00", "end": "14:00", "vulnerability": 3},
-            {"days": "Weekdays", "start": "17:00", "end": "20:00", "vulnerability": 4},
-            {"days": "Weekends", "start": "09:00", "end": "20:00", "vulnerability": 2},
+            {
+                "days": "Weekdays",
+                "start": "12:00",
+                "end": "14:00",
+                "vulnerability": 0.7,
+            },
+            {
+                "days": "Weekdays",
+                "start": "17:00",
+                "end": "20:00",
+                "vulnerability": 0.8,
+            },
+            {
+                "days": "Weekends",
+                "start": "09:00",
+                "end": "20:00",
+                "vulnerability": 0.4,
+            },
         ],
         "school": [
-            {"days": "Weekdays", "start": "08:00", "end": "10:00", "vulnerability": 4},
-            {"days": "Weekdays", "start": "16:00", "end": "18:00", "vulnerability": 4},
+            {
+                "days": "Weekdays",
+                "start": "08:00",
+                "end": "10:00",
+                "vulnerability": 0.7,
+            },
+            {
+                "days": "Weekdays",
+                "start": "16:00",
+                "end": "18:00",
+                "vulnerability": 0.7,
+            },
         ],
         "attraction": [
-            {"days": "Weekdays", "start": "09:00", "end": "17:00", "vulnerability": 3},
-            {"days": "Weekends", "start": "09:00", "end": "17:00", "vulnerability": 5},
+            {
+                "days": "Weekdays",
+                "start": "09:00",
+                "end": "17:00",
+                "vulnerability": 0.6,
+            },
+            {
+                "days": "Weekends",
+                "start": "09:00",
+                "end": "17:00",
+                "vulnerability": 1.0,
+            },
         ],
         "station": [
-            {"days": "Weekdays", "start": "07:00", "end": "09:00", "vulnerability": 5},
-            {"days": "Weekdays", "start": "12:00", "end": "14:00", "vulnerability": 3},
-            {"days": "Weekdays", "start": "17:00", "end": "19:00", "vulnerability": 5},
+            {
+                "days": "Weekdays",
+                "start": "07:00",
+                "end": "09:00",
+                "vulnerability": 0.5,
+            },
+            {
+                "days": "Weekdays",
+                "start": "12:00",
+                "end": "14:00",
+                "vulnerability": 0.2,
+            },
+            {
+                "days": "Weekdays",
+                "start": "17:00",
+                "end": "19:00",
+                "vulnerability": 0.5,
+            },
         ],
         "bus_station": [
-            {"days": "Weekdays", "start": "07:00", "end": "09:00", "vulnerability": 5},
-            {"days": "Weekdays", "start": "12:00", "end": "14:00", "vulnerability": 3},
-            {"days": "Weekdays", "start": "17:00", "end": "19:00", "vulnerability": 5},
+            {
+                "days": "Weekdays",
+                "start": "07:00",
+                "end": "09:00",
+                "vulnerability": 0.6,
+            },
+            {
+                "days": "Weekdays",
+                "start": "12:00",
+                "end": "14:00",
+                "vulnerability": 0.4,
+            },
+            {
+                "days": "Weekdays",
+                "start": "17:00",
+                "end": "19:00",
+                "vulnerability": 0.6,
+            },
         ],
         "university": [
-            {"days": "Weekdays", "start": "07:00", "end": "09:00", "vulnerability": 4},
-            {"days": "Weekdays", "start": "17:00", "end": "19:00", "vulnerability": 4},
+            {
+                "days": "Weekdays",
+                "start": "07:00",
+                "end": "09:00",
+                "vulnerability": 0.7,
+            },
+            {
+                "days": "Weekdays",
+                "start": "17:00",
+                "end": "19:00",
+                "vulnerability": 0.7,
+            },
         ],
         "industrial": [
-            {"days": "Weekdays", "start": "08:00", "end": "17:00", "vulnerability": 3},
-            {"days": "Weekends", "start": "00:00", "end": "00:00", "vulnerability": 0},
+            {
+                "days": "Weekdays",
+                "start": "08:00",
+                "end": "17:00",
+                "vulnerability": 0.3,
+            },
         ],
     }
 

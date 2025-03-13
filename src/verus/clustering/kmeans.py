@@ -560,7 +560,7 @@ class KMeansHaversine(Logger):
             self.log(f"Error creating result DataFrames: {e}", "error")
             return None, None
 
-    def create_map(
+    def view(
         self, cluster_df, centroids_df=None, area_boundary_path=None, save_path=None
     ):
         """
@@ -675,9 +675,30 @@ class KMeansHaversine(Logger):
                     else:
                         hex_color = "#FF0000"  # Default to red if out of range
 
+                    # Create a DivIcon with the cluster number inside
+                    icon = folium.DivIcon(
+                        icon_size=(40, 40),
+                        icon_anchor=(20, 20),
+                        html=f"""
+                            <div style="
+                                background-color: #A52A2A;
+                                width: 20px;
+                                height: 20px;
+                                display: flex;
+                                justify-content: center;
+                                align-items: center;
+                                border-radius: 50%;
+                                color: white;
+                                font-weight: normal;
+                                font-size: 10px;
+                            ">
+                                {int(cluster_id)}
+                            </div>
+                        """,
+                    )
                     folium.Marker(
                         location=[row["latitude"], row["longitude"]],
-                        icon=folium.Icon(color="red", icon="info-sign"),
+                        icon=icon,
                         popup=f"Centroid {cluster_id}: {row.get('size', 'N/A')} points",
                     ).add_to(centroid_group)
 
@@ -856,7 +877,7 @@ class KMeansHaversine(Logger):
             # Create map if boundary path was provided
             map_obj = None
             if area_boundary_path and cluster_df is not None:
-                map_obj = self.create_map(cluster_df, centroids_df, area_boundary_path)
+                map_obj = self.view(cluster_df, centroids_df, area_boundary_path)
 
             # Return results
             return {

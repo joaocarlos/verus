@@ -17,7 +17,7 @@ Welcome to VERUS's documentation!
 =================================
 
 VERUS (Vulnerability Evaluation for Resilient Urban Systems) is a comprehensive toolkit 
-for urban vulnerability assessment through spatial analysis.
+for urban vulnerability assessment through spatiotemporal analysis.
 
 .. toctree::
    :maxdepth: 2
@@ -25,7 +25,7 @@ for urban vulnerability assessment through spatial analysis.
 
    installation
    quickstart
-   user_guide/index
+   concepts/index
    examples/index
    tutorials/index
    api/index

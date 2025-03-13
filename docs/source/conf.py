@@ -39,9 +39,9 @@ language = "en"
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
 html_theme = "sphinx_rtd_theme"
-html_static_path = ["_static"]
-html_logo = "../../path/to/logo.png"  # Add your logo if available
-html_favicon = "../../path/to/favicon.ico"  # Add favicon if available
+# html_static_path = ["_static"]
+# html_logo = "../../src/figures/verus_logo.png"  # Add your logo if available
+# html_favicon = "../../path/to/favicon.ico"  # Add favicon if available
 
 # -- Options for todo extension ----------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/extensions/todo.html#configuration

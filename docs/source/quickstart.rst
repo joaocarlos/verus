@@ -22,7 +22,6 @@ Here's a minimal example that demonstrates the core functionality:
     from verus import VERUS
     from verus.data import DataExtractor, TimeWindowGenerator
     from verus.grid import HexagonGridGenerator
-    import pandas as pd
     
     # 1. Extract POI data
     extractor = DataExtractor(region="Porto, Portugal")
@@ -37,29 +36,32 @@ Here's a minimal example that demonstrates the core functionality:
     hex_grid = grid_gen.run()
     
     # 4. Initialize vulnerability assessor
-    assessor = VERUS(
-        place_name="Porto",
-        method="KM-OPTICS",
-        evaluation_time="ET4",
-        distance_method="gaussian"
-    )
+    config = {
+        "max_vulnerability": {"Porto": 0.0003476593149558199},
+    }
+    assessor = VERUS(place_name="Porto", config=config)
     
     # 5. Load data
     assessor.load(
         potis_df=poi_data,
-        centroids_df=pd.DataFrame(columns=["latitude", "longitude"]),
+        time_windows_dict=time_windows,
         zones_gdf=hex_grid
     )
     
     # 6. Run assessment
-    results = assessor.run(time_windows=time_windows)
+    evaluation_time = tw_gen.to_unix_epoch("2025-03-13 17:30:00")
+    results = assessor.run(evaluation_time=evaluation_time)
     
     # 7. Save results
     assessor.save("./results/")
+    assessor.visualize("./results/Porto_2025-03-13_17:30:00")
+
+Follow this example in the project's notebooks folder.
 
 Next Steps
 ----------
 
-- Explore detailed [examples](examples/index)
-- Check out the [tutorials](tutorials/index)
-- See the [API Reference](api/index) for complete documentation
+- Understand the :doc:`core concepts <concepts/index>`
+- Explore detailed :doc:`examples <examples/index>`
+- Check out the :doc:`tutorials <tutorials/index>`
+- See the :doc:`API Reference <api/index>` for complete documentation

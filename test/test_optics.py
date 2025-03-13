@@ -257,7 +257,7 @@ if __name__ == "__main__":
                 # Step 3: Create map visualization and save it directly
                 logger.log("Step 3: Creating map visualization", level="info")
                 map_path = os.path.join(base_dir, "maps", "Porto_lunch_clusters.html")
-                lunch_map = custom_optics.create_map(
+                lunch_map = custom_optics.view(
                     lunch_clusters,
                     lunch_centroids,
                     boundary_path,

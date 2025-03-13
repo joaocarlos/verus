@@ -488,7 +488,7 @@ class GeOPTICS(Logger):
             self.log(f"Error in clustering: {str(e)}", "error")
             return None, None
 
-    def create_map(
+    def view(
         self, cluster_df, centroids_df=None, area_boundary_path=None, save_path=None
     ):
         """
@@ -564,8 +564,9 @@ class GeOPTICS(Logger):
 
                 folium.CircleMarker(
                     location=[row["latitude"], row["longitude"]],
-                    radius=5,
+                    radius=3,
                     color=color,
+                    stroke=False,
                     fill=True,
                     fill_color=color,
                     fill_opacity=0.7,
@@ -582,10 +583,36 @@ class GeOPTICS(Logger):
                 centroid_group = folium.FeatureGroup(name="Cluster Centroids")
 
                 for i, row in centroids_df.iterrows():
+                    cluster_num = int(row["cluster"])
+                    cluster_size = row.get("size", "N/A")
+
+                    # Create a DivIcon with the cluster number inside
+                    icon = folium.DivIcon(
+                        icon_size=(40, 40),
+                        icon_anchor=(20, 20),
+                        html=f"""
+                            <div style="
+                                background-color: #A52A2A;
+                                width: 20px;
+                                height: 20px;
+                                display: flex;
+                                justify-content: center;
+                                align-items: center;
+                                border-radius: 50%;
+                                color: white;
+                                font-weight: normal;
+                                font-size: 10px;
+                            ">
+                                {cluster_num}
+                            </div>
+                        """,
+                    )
+
                     folium.Marker(
                         location=[row["latitude"], row["longitude"]],
-                        icon=folium.Icon(color="red", icon="info-sign"),
-                        popup=f"Centroid {row['cluster']}: {row.get('size', 'N/A')} points",
+                        icon=icon,
+                        popup=f"Centroid {cluster_num}: {cluster_size} points",
+                        tooltip=f"Centroid {cluster_num}: {cluster_size} points",
                     ).add_to(centroid_group)
 
                 centroid_group.add_to(m)
@@ -726,7 +753,7 @@ class GeOPTICS(Logger):
             # Create map if boundary path was provided
             map_obj = None
             if area_boundary_path and cluster_df is not None:
-                map_obj = self.create_map(cluster_df, centroids_df, area_boundary_path)
+                map_obj = self.view(cluster_df, centroids_df, area_boundary_path)
 
             # Return results
             return {

@@ -29,13 +29,23 @@ class VERUS(Logger):
     Attributes:
         place_name (str): Name of the place to analyze
         method (str): Clustering method used (e.g., "KM-OPTICS")
-        evaluation_time (str): Time scenario to evaluate
         distance_method (str): Method for calculating vulnerability based on distance
             Options: "gaussian", "inverse_weighted"
         sigma (float): Bandwidth parameter for Gaussian methods (in meters)
         config (dict): Configuration parameters
         verbose (bool): Whether to print verbose logging
     """
+
+    # Define default configuration
+    DEFAULT_CONFIG = {
+        "max_vulnerability": {},  # Map of place_name -> max vulnerability value
+        "map_center": {},  # Map of place_name -> {"lat": float, "lon": float}
+        "boundary_paths": {},  # Map of place_name -> boundary file path
+        "clustering": {
+            "optics": {"min_samples": 5, "xi": 0.05, "min_cluster_size": 5},
+            "kmeans": {"n_clusters": 8, "init": "k-means++", "random_state": 42},
+        },
+    }
 
     DISTANCE_METHODS = {
         "gaussian": "_gaussian_weighted_vulnerability",
@@ -46,11 +56,10 @@ class VERUS(Logger):
         self,
         place_name,
         method="KM-OPTICS",
-        evaluation_time="ET4",
         distance_method="gaussian",
         sigma=1000,
         config=None,
-        verbose=True,  # Add verbose parameter with default value
+        verbose=True,
     ):
         super().__init__()
         if distance_method not in self.DISTANCE_METHODS:
@@ -60,16 +69,19 @@ class VERUS(Logger):
             )
         self.place_name = place_name
         self.method = method
-        self.evaluation_time = evaluation_time
         self.distance_method = distance_method
         self.sigma = sigma
         self.config = config
         self.verbose = verbose  # Initialize verbose attribute
 
+        # Initialize configuration with defaults, then update with user-provided config
+        self.config = self._init_config(config)
+
         # Data containers (to be loaded from DataFrames)
         self.poti_df = None
         self.cluster_centers = None
         self.vulnerability_zones = None
+        self.time_windows = None
 
         # Results storage
         self.results = {}
@@ -78,9 +90,79 @@ class VERUS(Logger):
             f"VulnerabilityAssessor initialized for {place_name} using {distance_method} method"
         )
 
-    def load(self, potis_df, centroids_df, zones_gdf):
+    def _init_config(self, user_config=None):
         """
-        Load POI, cluster centroids, and vulnerability zones data from DataFrames.
+        Initialize configuration with defaults and user overrides.
+
+        Args:
+            user_config (dict, optional): User-provided configuration that overrides defaults
+
+        Returns:
+            dict: Complete configuration dictionary
+        """
+        # Start with a deep copy of the default config
+        import copy
+
+        config = copy.deepcopy(self.DEFAULT_CONFIG)
+
+        # Update with user-provided config if available
+        if user_config:
+            self._deep_update(config, user_config)
+
+        return config
+
+    def _deep_update(self, d, u):
+        """
+        Recursively update a nested dictionary with another dictionary.
+
+        Args:
+            d (dict): Dictionary to update
+            u (dict): Dictionary with updates
+
+        Returns:
+            dict: Updated dictionary
+        """
+        import collections.abc
+
+        for k, v in u.items():
+            if (
+                isinstance(v, collections.abc.Mapping)
+                and k in d
+                and isinstance(d[k], dict)
+            ):
+                self._deep_update(d[k], v)
+            else:
+                d[k] = v
+        return d
+
+    def _get_config(self, *keys, default=None):
+        """
+        Safely get a configuration value by path.
+
+        Args:
+            *keys: Sequence of keys to navigate the config dictionary
+            default: Default value to return if path doesn't exist
+
+        Returns:
+            The configuration value or default
+        """
+        current = self.config
+        for key in keys:
+            if not isinstance(current, dict) or key not in current:
+                return default
+            current = current[key]
+        return current
+
+    def load(
+        self,
+        potis_df=None,
+        centroids_df=None,
+        zones_gdf=None,
+        time_windows_df=None,
+        time_windows_dict=None,
+    ):
+        """
+        Load POI, cluster centroids, vulnerability zones, and time windows data.
 
         This method accepts pre-constructed DataFrames rather than reading from files,
         providing a more flexible workflow for data integration.
@@ -91,6 +173,10 @@ class VERUS(Logger):
             centroids_df (pd.DataFrame): DataFrame with cluster centroids. Must contain
                 "latitude" and "longitude".
             zones_gdf (GeoDataFrame): GeoDataFrame with vulnerability zones geometry.
+            time_windows_df (pd.DataFrame, optional): DataFrame with time window data.
+                Must have "category" and "vi" columns.
+            time_windows_dict (dict, optional): Dictionary of time windows where keys are
+                categories and values are DataFrames with "vi" column.
 
         Returns:
             self: For method chaining
@@ -98,72 +184,219 @@ class VERUS(Logger):
         Raises:
             ValueError: If required columns are missing or data is invalid.
         """
-        # Validate POTIs DataFrame
-        required_poti_columns = ["latitude", "longitude", "category"]
-        missing_columns = [
-            col for col in required_poti_columns if col not in potis_df.columns
-        ]
-        if missing_columns:
+        # Load POTIs DataFrame
+        if potis_df is not None:
+            # Validate POTIs DataFrame
+            required_poti_columns = ["latitude", "longitude", "category"]
+            missing_columns = [
+                col for col in required_poti_columns if col not in potis_df.columns
+            ]
+            if missing_columns:
+                self.log(
+                    f"POTI DataFrame missing required columns: {', '.join(missing_columns)}",
+                    level="error",
+                )
+                raise ValueError(
+                    f"POTI DataFrame missing required columns: {', '.join(missing_columns)}"
+                )
+            self.poti_df = potis_df.copy()
+
+            # Ensure vulnerability index column exists
+            if "vi" not in self.poti_df.columns:
+                self.log(
+                    "POTI DataFrame doesn't have 'vi' column. Using default vi=1.",
+                    level="warning",
+                )
+                self.poti_df["vi"] = 1.0
+
+            # Set default cluster if not present
+            if "cluster" not in self.poti_df.columns:
+                self.log(
+                    "POTI DataFrame doesn't have 'cluster' column. Setting all to 0.",
+                    level="warning",
+                )
+                self.poti_df["cluster"] = 0
+
+            # Log summary info
+            self.log(f"Loaded {len(self.poti_df)} POTIs", level="info")
+
+        # Load centroids DataFrame
+        if centroids_df is not None:
+            # Validate centroids DataFrame
+            required_centroid_columns = ["latitude", "longitude"]
+            missing_columns = [
+                col
+                for col in required_centroid_columns
+                if col not in centroids_df.columns
+            ]
+            if missing_columns:
+                self.log(
+                    f"Centroids DataFrame missing required columns: {', '.join(missing_columns)}",
+                    level="error",
+                )
+                raise ValueError(
+                    f"Centroids DataFrame missing required columns: {', '.join(missing_columns)}"
+                )
+            self.cluster_centers = centroids_df.copy()
             self.log(
-                f"POTI DataFrame missing required columns: {', '.join(missing_columns)}",
-                level="error",
+                f"Loaded {len(self.cluster_centers)} cluster centers", level="info"
             )
-            raise ValueError(
-                f"POTI DataFrame missing required columns: {', '.join(missing_columns)}"
-            )
-        self.poti_df = potis_df.copy()
 
-        # Ensure vulnerability index column exists
-        if "vi" not in self.poti_df.columns:
+        # Load vulnerability zones GeoDataFrame
+        if zones_gdf is not None:
+            # Validate vulnerability zones GeoDataFrame
+            if not isinstance(zones_gdf, gpd.GeoDataFrame):
+                self.log("Input zones data must be a GeoDataFrame", level="error")
+                raise ValueError("Zones data must be a GeoDataFrame")
+            self.vulnerability_zones = zones_gdf.copy()
+            if not all(self.vulnerability_zones.geometry.is_valid):
+                self.log(
+                    "Vulnerability zones contain invalid geometries", level="error"
+                )
+                raise ValueError("Vulnerability zones contain invalid geometries")
             self.log(
-                "POTI DataFrame doesn't have 'vi' column. Using default vi=1.",
-                level="warning",
+                f"Loaded {len(self.vulnerability_zones)} vulnerability zones",
+                level="info",
             )
-            self.poti_df["vi"] = 1.0
 
-        # Set default cluster if not present
-        if "cluster" not in self.poti_df.columns:
+        # Load time windows
+        if time_windows_df is not None:
+            self._load_time_windows_from_df(time_windows_df)
+        elif time_windows_dict is not None:
+            self._load_time_windows_from_dict(time_windows_dict)
+
+        # Log summary info if all data is loaded
+        if self.poti_df is not None and self.cluster_centers is not None:
+            n_clusters = len(np.unique(self.poti_df["cluster"]))
             self.log(
-                "POTI DataFrame doesn't have 'cluster' column. Setting all to 0.",
-                level="warning",
+                f"Successfully loaded {len(self.poti_df)} POTIs across {n_clusters} clusters",
+                level="success",
             )
-            self.poti_df["cluster"] = 0
-
-        # Validate centroids DataFrame
-        required_centroid_columns = ["latitude", "longitude"]
-        missing_columns = [
-            col for col in required_centroid_columns if col not in centroids_df.columns
-        ]
-        if missing_columns:
-            self.log(
-                f"Centroids DataFrame missing required columns: {', '.join(missing_columns)}",
-                level="error",
-            )
-            raise ValueError(
-                f"Centroids DataFrame missing required columns: {', '.join(missing_columns)}"
-            )
-        self.cluster_centers = centroids_df.copy()
-
-        # Validate vulnerability zones GeoDataFrame
-        if not isinstance(zones_gdf, gpd.GeoDataFrame):
-            self.log("Input zones data must be a GeoDataFrame", level="error")
-            raise ValueError("Zones data must be a GeoDataFrame")
-        self.vulnerability_zones = zones_gdf.copy()
-        if not all(self.vulnerability_zones.geometry.is_valid):
-            self.log("Vulnerability zones contain invalid geometries", level="error")
-            raise ValueError("Vulnerability zones contain invalid geometries")
-
-        # Log summary info
-        n_clusters = len(np.unique(self.poti_df["cluster"]))
-        self.log(
-            f"Loaded {len(self.poti_df)} POTIs across {n_clusters} clusters",
-            level="success",
-        )
-        self.log(
-            f"Loaded {len(self.vulnerability_zones)} vulnerability zones", level="info"
-        )
 
         return self
+
+    def _load_time_windows_from_df(self, time_windows_df):
+        """
+        Load time windows from a DataFrame.
+
+        Args:
+            time_windows_df (pd.DataFrame): DataFrame with time window data.
+                Must have "category" and "vi" columns.
+
+        Returns:
+            bool: Whether time windows were successfully loaded
+        """
+        if not isinstance(time_windows_df, pd.DataFrame):
+            self.log("Time windows must be a DataFrame", level="error")
+            return False
+
+        if (
+            "category" not in time_windows_df.columns
+            or "vi" not in time_windows_df.columns
+        ):
+            self.log(
+                "Time windows DataFrame must have 'category' and 'vi' columns",
+                level="error",
+            )
+            return False
+
+        self.time_windows = time_windows_df.copy()
+        self.log(f"Loaded {len(self.time_windows)} time window entries", level="info")
+        return True
+
+    def _load_time_windows_from_dict(self, time_windows_dict):
+        """
+        Load time windows from a dictionary.
+
+        Args:
+            time_windows_dict (dict): Dictionary where keys are categories
+                and values are DataFrames with "vi" column.
+
+        Returns:
+            bool: Whether time windows were successfully loaded
+        """
+        if not isinstance(time_windows_dict, dict):
+            self.log("Time windows dict must be a dictionary", level="error")
+            return False
+
+        dfs = []
+        for category, tw_df in time_windows_dict.items():
+            if not isinstance(tw_df, pd.DataFrame) or "vi" not in tw_df.columns:
+                self.log(
+                    f"Time window for category '{category}' must have 'vi' column",
+                    level="warning",
+                )
+                continue
+
+            # Create a new DataFrame with category and vi columns
+            category_df = pd.DataFrame(
+                {"category": [category] * len(tw_df), "vi": tw_df["vi"].values}
+            )
+
+            # Add timestamps if available
+            for col in ["ts", "te"]:
+                if col in tw_df.columns:
+                    category_df[col] = tw_df[col].values
+
+            dfs.append(category_df)
+
+        if dfs:
+            self.time_windows = pd.concat(dfs, ignore_index=True)
+            self.log(f"Loaded time windows for {len(dfs)} categories", level="info")
+            return True
+        else:
+            self.log("No valid time windows found in dictionary", level="warning")
+            return False
+
+    def _apply_time_windows_to_potis(self, evaluation_time=None):
+        """
+        Apply time windows to update POTIs vulnerability indices based on evaluation time.
+
+        Args:
+            evaluation_time (str, optional): Time scenario to evaluate.
+                If None, will use all time windows.
+
+        Returns:
+            pd.DataFrame: Updated POTIs DataFrame
+        """
+        if self.poti_df is None:
+            self.log("No POTIs loaded to apply time windows", level="warning")
+            return None
+
+        if self.time_windows is None:
+            self.log("No time windows loaded, using original vi values", level="info")
+            return self.poti_df.copy()
+
+        # Make a copy of the POTIs DataFrame to modify
+        updated_df = self.poti_df.copy()
+
+        # Filter time windows by evaluation time if provided
+        filtered_tw = self.time_windows
+        if evaluation_time is not None and "ts" in self.time_windows.columns:
+            filtered_tw = self.time_windows[
+                (self.time_windows["ts"] <= evaluation_time)
+                & (self.time_windows["te"] >= evaluation_time)
+            ]
+            self.log(
+                f"Filtered to {len(filtered_tw)} time windows for {evaluation_time}",
+                level="info",
+            )
+
+        # Get unique category-vi pairs
+        unique_vis = filtered_tw[["category", "vi"]].drop_duplicates()
+
+        # Update vi values based on category
+        updated_df = updated_df.merge(
+            unique_vis, on="category", how="left", suffixes=("", "_tw")
+        )
+
+        # Use new vi if available, otherwise keep original
+        if "vi_tw" in updated_df.columns:
+            updated_df["vi"] = updated_df["vi_tw"].fillna(updated_df["vi"])
+            updated_df.drop(columns=["vi_tw"], inplace=True)
+
+        self.log(f"Applied time windows to {len(updated_df)} POTIs", level="info")
+        return updated_df
 
     def _gaussian_weighted_vulnerability(self, x_c_z, y_c_z, potis):
         """
@@ -345,7 +578,7 @@ class VERUS(Logger):
 
         # Normalize VL_normalized to ensure it's between 0 and 1
         vl_min = vulnerability_zones["VL_normalized"].min()
-        vl_max = vulnerability_zones["VL_normalized"].max()
+        vl_max = 0.0003476593149558199  # vulnerability_zones["VL_normalized"].max()
         vulnerability_zones["VL_norm"] = (
             (vulnerability_zones["VL_normalized"] - vl_min) / (vl_max - vl_min)
             if vl_max != vl_min
@@ -443,12 +676,9 @@ class VERUS(Logger):
         )
 
         min_vl = zones["value"].min()
-        if (
-            self.config
-            and hasattr(self.config, "max_vulnerability")
-            and self.place_name in self.config.max_vulnerability
-        ):
-            max_vl = self.config.max_vulnerability[self.place_name]
+        # Use the new config helper method
+        max_vl = self._get_config("max_vulnerability", self.place_name)
+        if max_vl is not None:
             self.log(f"Using configured max vulnerability: {max_vl}", level="info")
         else:
             max_vl = zones["value"].max()
@@ -673,12 +903,18 @@ class VERUS(Logger):
 
         # Run OPTICS to obtain centers
         self.log("Running OPTICS clustering to obtain centres...", level="info")
+        optics_params = self._get_config(
+            "clustering",
+            "optics",
+            default={"min_samples": 5, "xi": 0.05, "min_cluster_size": 5},
+        )
         optics = GeOPTICS(
-            min_samples=5, xi=0.05, min_cluster_size=5, verbose=self.verbose
+            min_samples=optics_params.get("min_samples", 5),
+            xi=optics_params.get("xi", 0.05),
+            min_cluster_size=optics_params.get("min_cluster_size", 5),
+            verbose=self.verbose,
         )
-        optics_results = optics.run(
-            data_source=df, area_boundary_path=None  # Not needed here
-        )
+        optics_results = optics.run(data_source=df)
 
         # Check if OPTICS produced enough centroids
         if (
@@ -687,14 +923,17 @@ class VERUS(Logger):
         ):
             centers = optics_results["centroids"]
             self.log(f"Running KMeans with {len(centers)} OPTICS centres", level="info")
-            kmeans = KMeansHaversine(
-                n_clusters=len(centers),
-                init="predefined",
-                random_state=42,
-                verbose=self.verbose,
-                predefined_centers=centers,
+            kmeans_params = self._get_config(
+                "clustering",
+                "kmeans",
+                default={"n_clusters": 8, "init": "predefined", "random_state": 42},
             )
-            # FIXED: Remove all problematic parameters (evaluation_time, save_output)
+            kmeans = KMeansHaversine(
+                n_clusters=kmeans_params.get("n_clusters", 8),
+                init=kmeans_params.get("init", "predefined"),
+                random_state=kmeans_params.get("random_state", 42),
+                verbose=self.verbose,
+            )
             # Only pass what's needed
             kmeans_results = kmeans.run(
                 data_source=df,
@@ -711,7 +950,7 @@ class VERUS(Logger):
             kmeans = KMeansHaversine(
                 n_clusters=8, init="k-means++", verbose=self.verbose, random_state=42
             )
-            # FIXED: Remove all problematic parameters
+            # Remove all problematic parameters
             kmeans_results = kmeans.run(
                 data_source=df,
             )
@@ -721,21 +960,6 @@ class VERUS(Logger):
         # Add evaluation_time to results directly
         kmeans_results["evaluation_time"] = evaluation_time
         return kmeans_results
-
-    def create_map(self, clusters, centroids, area_boundary_path):
-        """
-        Create an interactive map with vulnerability zones and clusters.
-
-        Args:
-            clusters (pd.DataFrame): DataFrame with cluster assignments
-            centroids (pd.DataFrame): DataFrame with cluster centroids
-            area_boundary_path (str): Path to GeoJSON with area boundary
-
-        Returns:
-            folium.Map: Interactive map object
-        """
-        # Redirect to the existing implementation
-        return self._create_interactive_map(area_boundary_path)
 
     def _extract_place_name(self, data_source):
         """
@@ -765,10 +989,82 @@ class VERUS(Logger):
         # Default to configured place_name
         return self.place_name
 
+    def _create_interactive_map(self, output_file=None):
+        """
+        Create an interactive folium map of vulnerability zones.
+
+        Args:
+            output_file (str, optional): File path to save the map. If None, doesn't save.
+
+        Returns:
+            folium.Map: Interactive map object
+        """
+        import folium
+        from branca.colormap import linear
+
+        # Get map center (use config if available, otherwise calculate from POTIs)
+        map_center_config = self._get_config("map_center", self.place_name)
+        if map_center_config:
+            map_center = [map_center_config["lat"], map_center_config["lon"]]
+        else:
+            coords = self.poti_df[["latitude", "longitude"]].to_numpy()
+            map_center = [coords[:, 0].mean(), coords[:, 1].mean()]
+
+        # Create map
+        m = folium.Map(location=map_center, zoom_start=13, tiles="cartodbpositron")
+
+        # Add vulnerability zones
+        folium.GeoJson(
+            data=self.vulnerability_zones,
+            style_function=lambda feature: {
+                "fillColor": feature["properties"]["color"],
+                "color": feature["properties"]["color"],
+                "weight": 0.1,
+                "fillOpacity": 0.7,
+            },
+            popup=folium.GeoJsonPopup(
+                fields=["VL_normalized_smoothed", "cluster"],
+                aliases=["VL:", "Cluster:"],
+                localize=True,
+            ),
+        ).add_to(m)
+
+        # Add boundary if available
+        boundary_path = self._get_config("boundary_paths", self.place_name)
+        if not boundary_path:
+            # Try standard path
+            potential_path = f"./geojson/{self.place_name}_boundaries.geojson"
+            if os.path.exists(potential_path):
+                boundary_path = potential_path
+
+        if boundary_path and os.path.exists(boundary_path):
+            folium.GeoJson(
+                boundary_path,
+                name="boundary",
+                style_function=lambda feature: {
+                    "color": "#B2BEB5",
+                    "weight": 2,
+                    "fillOpacity": 0,
+                },
+            ).add_to(m)
+
+        # Add color scale
+        color_scale = linear.YlOrRd_09.scale(0, 1)
+        color_scale.caption = "Vulnerability Level"
+        color_scale.caption_font_size = "14pt"
+        color_scale.add_to(m)
+
+        # Save map if output file is specified
+        if output_file:
+            os.makedirs(os.path.dirname(output_file), exist_ok=True)
+            m.save(output_file)
+
+        return m
+
     def run(
         self,
-        data_source,
-        time_windows=None,
+        data_source=None,
+        evaluation_time=None,
         centers_input=None,
         area_boundary_path=None,
     ):
@@ -785,9 +1081,8 @@ class VERUS(Logger):
         Args:
             data_source (pd.DataFrame or str, optional): POTI DataFrame or path to POTI data.
                 If None, uses data previously loaded via load().
-            time_windows (dict or pd.DataFrame, optional): Time window data for updating vulnerability indices.
-                If dict, keys should be category names and values should be DataFrames with a "vi" column.
-                If DataFrame, must contain "category" and "vi" columns.
+            evaluation_time (str, optional): Time scenario to evaluate.
+                Used to filter time windows and in result naming.
             centers_input (pd.DataFrame, optional): Predefined centers for clustering.
                 If None, centers are determined by the clustering pipeline.
             area_boundary_path (str, optional): Path to boundary GeoJSON for visualization.
@@ -802,6 +1097,7 @@ class VERUS(Logger):
                 - "labels", "inertia", "n_iter": Additional clustering information
                 - "vulnerability_zones": GeoDataFrame with vulnerability zones
                 - "error": Error message if an exception occurred
+                - "evaluation_time": The evaluation time used
         """
         try:
             # Extract place name from data source if possible
@@ -836,55 +1132,32 @@ class VERUS(Logger):
                 self.log("Adding default vulnerability index (vi=1.0)", level="info")
                 df["vi"] = 1.0
 
-            # --- Update vulnerability index based on external time window data ---
-            if time_windows is not None:
+            # --- Apply time windows to update vulnerability indices ---
+            if self.time_windows is not None:
                 self.log(
-                    "Updating vulnerability index using external time window data...",
+                    f"Applying time windows for evaluation time: {evaluation_time}",
                     level="info",
                 )
-                if isinstance(time_windows, dict):
-                    dfs = []
-                    for category, tw_df in time_windows.items():
-                        sub_df = df[df["category"] == category].copy()
-                        if not sub_df.empty:
-                            sub_df["vi"] = tw_df["vi"].iloc[0]
-                            dfs.append(sub_df)
-                    if dfs:
-                        df = pd.concat(dfs, ignore_index=True)
-                    else:
-                        self.log(
-                            "No matching categories found in time windows; using original vi values.",
-                            level="warning",
-                        )
-                elif isinstance(time_windows, pd.DataFrame):
-                    if (
-                        "category" in time_windows.columns
-                        and "vi" in time_windows.columns
-                    ):
-                        temp = time_windows[["category", "vi"]].drop_duplicates()
-                        df = df.merge(
-                            temp, on="category", how="left", suffixes=("", "_tw")
-                        )
-                        df["vi"] = df["vi_tw"].fillna(df["vi"])
-                        df.drop(columns=["vi_tw"], inplace=True)
-                    else:
-                        self.log(
-                            "Time windows DataFrame must have 'category' and 'vi' columns.",
-                            level="error",
-                        )
-                        raise ValueError("Invalid time windows DataFrame format.")
-                else:
-                    self.log(
-                        "time_windows must be a dict or a DataFrame.", level="error"
-                    )
-                    raise ValueError("Invalid type for time_windows parameter.")
+                df = self._apply_time_windows_to_potis(evaluation_time)
 
             # --- Execute the clustering pipeline (OPTICS -> KMeans) ---
-            output_dir = f"./results/{place_name}/"
-            clusters_results = self._run_clustering_pipeline(df, self.evaluation_time)
+            clusters_results = self._run_clustering_pipeline(
+                df, evaluation_time or "default"
+            )
+
+            # Check cluster distribution
+            # Add debug code to check cluster distribution
+            if "clusters" in clusters_results:
+                cluster_counts = clusters_results["clusters"]["cluster"].value_counts()
+                self.log(f"Cluster distribution: {dict(cluster_counts)}", level="info")
+                if len(cluster_counts) <= 1:
+                    self.log(
+                        "WARNING: All POIs assigned to a single cluster!",
+                        level="warning",
+                    )
 
             # Update internal state with clustering results
-            self.poti_df = clusters_results.get("input_data", df)
+            self.poti_df = clusters_results.get("clusters", df)
             # Fix: Use "centroids" key instead of "clusters"
             self.cluster_centers = clusters_results.get("centroids", None)
 
@@ -906,7 +1179,8 @@ class VERUS(Logger):
                 "labels": clusters_results.get("labels"),
                 "inertia": clusters_results.get("inertia"),
                 "n_iter": clusters_results.get("n_iter"),
-                "vulnerability_zones": self.vulnerability_zones,  # Ensure this key is present
+                "vulnerability_zones": self.vulnerability_zones,
+                "evaluation_time": evaluation_time or "default",
             }
 
         except Exception as e:
@@ -925,84 +1199,78 @@ class VERUS(Logger):
                 "n_iter": None,
                 "vulnerability_zones": None,
                 "error": str(e),  # Include error message in results
+                "evaluation_time": evaluation_time or "default",
             }
 
-    def _create_interactive_map(self, output_file=None):
-        """
-        Create an interactive folium map of vulnerability zones.
+    # def _create_interactive_map(self, output_file=None):
+    #     """
+    #     Create an interactive folium map of vulnerability zones.
 
-        Args:
-            output_file (str, optional): File path to save the map. If None, doesn't save.
+    #     Args:
+    #         output_file (str, optional): File path to save the map. If None, doesn't save.
 
-        Returns:
-            folium.Map: Interactive map object
-        """
-        import folium
-        from branca.colormap import linear
+    #     Returns:
+    #         folium.Map: Interactive map object
+    #     """
 
-        # Get map center (use config if available, otherwise calculate from POTIs)
-        if (
-            self.config
-            and hasattr(self.config, "map_center")
-            and self.place_name in self.config.map_center
-        ):
-            map_center = [
-                self.config.map_center[self.place_name]["lat"],
-                self.config.map_center[self.place_name]["lon"],
-            ]
-        else:
-            coords = self.poti_df[["latitude", "longitude"]].to_numpy()
-            map_center = [coords[:, 0].mean(), coords[:, 1].mean()]
+    #     import folium
+    #     from branca.colormap import linear
 
-        # Create map
-        m = folium.Map(location=map_center, zoom_start=13, tiles="cartodbpositron")
+    #     # Get map center (use config if available, otherwise calculate from POTIs)
+    #     map_center_config = self._get_config("map_center", self.place_name)
+    #     if map_center_config:
+    #         map_center = [map_center_config["lat"], map_center_config["lon"]]
+    #     else:
+    #         coords = self.poti_df[["latitude", "longitude"]].to_numpy()
+    #         map_center = [coords[:, 0].mean(), coords[:, 1].mean()]
 
-        # Add vulnerability zones
-        folium.GeoJson(
-            data=self.vulnerability_zones,
-            style_function=lambda feature: {
-                "fillColor": feature["properties"]["color"],
-                "color": feature["properties"]["color"],
-                "weight": 0.1,
-                "fillOpacity": 0.7,
-            },
-            popup=folium.GeoJsonPopup(
-                fields=["VL_normalized_smoothed", "cluster"],
-                aliases=["VL:", "Cluster:"],
-                localize=True,
-            ),
-        ).add_to(m)
+    #     # Create map
+    #     m = folium.Map(location=map_center, zoom_start=13, tiles="cartodbpositron")
 
-        # Add boundary if available
-        boundary_path = None
-        if self.config and hasattr(self.config, "boundary_paths"):
-            boundary_path = self.config.boundary_paths.get(self.place_name)
-        else:
-            # Try standard path
-            potential_path = f"./geojson/{self.place_name}_boundaries.geojson"
-            if os.path.exists(potential_path):
-                boundary_path = potential_path
+    #     # Add vulnerability zones
+    #     folium.GeoJson(
+    #         data=self.vulnerability_zones,
+    #         style_function=lambda feature: {
+    #             "fillColor": feature["properties"]["color"],
+    #             "color": feature["properties"]["color"],
+    #             "weight": 0.1,
+    #             "fillOpacity": 0.7,
+    #         },
+    #         popup=folium.GeoJsonPopup(
+    #             fields=["VL_normalized_smoothed", "cluster"],
+    #             aliases=["VL:", "Cluster:"],
+    #             localize=True,
+    #         ),
+    #     ).add_to(m)
 
-        if boundary_path and os.path.exists(boundary_path):
-            folium.GeoJson(
-                boundary_path,
-                name="boundary",
-                style_function=lambda feature: {
-                    "color": "#B2BEB5",
-                    "weight": 2,
-                    "fillOpacity": 0,
-                },
-            ).add_to(m)
+    #     # Add boundary if available
+    #     boundary_path = self._get_config("boundary_paths", self.place_name)
+    #     if not boundary_path:
+    #         # Try standard path
+    #         potential_path = f"./geojson/{self.place_name}_boundaries.geojson"
+    #         if os.path.exists(potential_path):
+    #             boundary_path = potential_path
 
-        # Add color scale
-        color_scale = linear.YlOrRd_09.scale(0, 1)
-        color_scale.caption = "Vulnerability Level"
-        color_scale.caption_font_size = "14pt"
-        color_scale.add_to(m)
+    #     if boundary_path and os.path.exists(boundary_path):
+    #         folium.GeoJson(
+    #             boundary_path,
+    #             name="boundary",
+    #             style_function=lambda feature: {
+    #                 "color": "#B2BEB5",
+    #                 "weight": 2,
+    #                 "fillOpacity": 0,
+    #             },
+    #         ).add_to(m)
 
-        # Save map if output file is specified
-        if output_file:
-            os.makedirs(os.path.dirname(output_file), exist_ok=True)
-            m.save(output_file)
+    #     # Add color scale
+    #     color_scale = linear.YlOrRd_09.scale(0, 1)
+    #     color_scale.caption = "Vulnerability Level"
+    #     color_scale.caption_font_size = "14pt"
+    #     color_scale.add_to(m)
 
-        return m
+    #     # Save map if output file is specified
+    #     if output_file:
+    #         os.makedirs(os.path.dirname(output_file), exist_ok=True)
+    #         m.save(output_file)
+
+    #     return m

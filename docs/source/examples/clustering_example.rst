@@ -9,7 +9,7 @@ This example shows how to perform spatial clustering on Points of Interest.
     import pandas as pd
 
     # Load POI data
-    poi_data = pd.read_csv("./data/poti/porto_poti.csv")
+    poi_data = pd.read_csv("../../data/poti/Porto_dataset_buffered.csv")
 
     # Run OPTICS clustering to obtain initial centers
     optics = GeOPTICS(
@@ -44,3 +44,5 @@ This example shows how to perform spatial clustering on Points of Interest.
         
         print(f"Found {len(centroids)} clusters")
         print(f"Cluster distribution:\n{clusters['cluster'].value_counts()}")
+    
+Follow this example in the project's notebooks folder.
