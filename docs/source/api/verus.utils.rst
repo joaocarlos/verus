@@ -11,6 +11,5 @@ Submodules
 .. toctree::
    :maxdepth: 1
 
-   verus.utils.config
    verus.utils.logger
    verus.utils.timer

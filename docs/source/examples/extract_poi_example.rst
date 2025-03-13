@@ -6,7 +6,6 @@ This example demonstrates how to extract Points of Interest (POIs) from OpenStre
 .. code-block:: python
 
     import os
-    import pandas as pd
     from verus.data import DataExtractor
 
     # Define target region
@@ -31,3 +30,5 @@ This example demonstrates how to extract Points of Interest (POIs) from OpenStre
     output_dir = "./data/poti/"
     os.makedirs(output_dir, exist_ok=True)
     poi_data.to_csv(os.path.join(output_dir, "porto_poti.csv"), index=False)
+
+Follow this example in the project's notebooks folder.
