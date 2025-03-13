@@ -13,8 +13,11 @@ VERUS Documentation
 .. image:: https://img.shields.io/badge/version-1.0.0-blue?style=for-the-badge&logo=github
    :alt: Version 1.0.0
 
-Welcome to VERUS documentation. This library provides tools for extracting POIs from 
-OpenStreetMap, clustering them, and analyzing urban vulnerability.
+Welcome to VERUS's documentation!
+=================================
+
+VERUS (Vulnerability Evaluation for Resilient Urban Systems) is a comprehensive toolkit 
+for urban vulnerability assessment through spatial analysis.
 
 .. toctree::
    :maxdepth: 2
@@ -22,11 +25,12 @@ OpenStreetMap, clustering them, and analyzing urban vulnerability.
 
    installation
    quickstart
-   tutorials/index
-   api/modules
+   user_guide/index
    examples/index
+   tutorials/index
+   api/index
    development
-   
+
 Indices and tables
 ==================
 

@@ -1,35 +1,35 @@
-# Installation
+Installation
+============
 
-## Prerequisites
-
--   Python 3.8 or higher
--   pip (Python package manager)
--   Spatial libraries dependencies (GDAL, Proj4)
-
-## Basic Installation
+VERUS can be installed using pip:
 
 .. code-block:: bash
 
     pip install verus
 
-## Development Installation
+Development Installation
+------------------------
+
+For development, clone the repository and install in development mode:
 
 .. code-block:: bash
 
-    git clone https://github.com/yourusername/verus.git
+    git clone https://github.com/your-username/verus.git
     cd verus
-    pip install -e ".[dev]"
+    pip install -e .
 
-## Optional Dependencies
+Dependencies
+------------
 
-For visualization tools:
+VERUS requires the following key dependencies:
 
-.. code-block:: bash
+- Python 3.8+
+- NumPy
+- Pandas
+- GeoPandas
+- Scikit-learn
+- OSMnx
+- Folium
+- Haversine
 
-    pip install -e ".[viz]"
-
-For documentation building:
-
-.. code-block:: bash
-
-    pip install -e ".[docs]"
+These dependencies will be automatically installed when installing VERUS with pip.

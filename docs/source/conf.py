@@ -1,6 +1,8 @@
 import os
 import sys
 
+# Add the project root to the path so modules can be imported
+sys.path.insert(0, os.path.abspath("../.."))
 sys.path.insert(0, os.path.abspath("../../src"))
 
 # Configuration file for the Sphinx documentation builder.
@@ -24,13 +26,8 @@ release = "1.0.0"
 extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.viewcode",
-    "sphinx.ext.todo",
     "sphinx.ext.napoleon",
-    "sphinx.ext.autosummary",
-    "sphinx.ext.coverage",
     "sphinx.ext.intersphinx",
-    "sphinx_autodoc_typehints",
-    "nbsphinx",
 ]
 
 templates_path = ["_templates"]
@@ -68,6 +65,5 @@ autodoc_default_options = {
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
     "numpy": ("https://numpy.org/doc/stable", None),
-    "pandas": ("https://pandas.pydata.org/docs/", None),
-    "geopandas": ("https://geopandas.org/", None),
+    "pandas": ("https://pandas.pydata.org/pandas-docs/stable", None),
 }
