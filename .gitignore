@@ -2,9 +2,6 @@
 .DS_store
 *cache
 
-# Temp
-notebook
-
 # Result files
 *.html
 *.geojson
