@@ -18,6 +18,14 @@ class VERUS(Logger):
     - Computing vulnerability levels using various distance methods
     - Visualizing and exporting results
 
+    The workflow consists of these main steps:
+    1. Load data (POIs, centroids, zones) using the `load()` method
+    2. Update vulnerability indices based on time windows
+    3. Run clustering using OPTICS followed by KMeans
+    4. Calculate vulnerability for each zone
+    5. Apply smoothing to improve spatial continuity
+    6. Export or visualize results
+
     Attributes:
         place_name (str): Name of the place to analyze
         method (str): Clustering method used (e.g., "KM-OPTICS")
@@ -74,16 +82,21 @@ class VERUS(Logger):
         """
         Load POI, cluster centroids, and vulnerability zones data from DataFrames.
 
+        This method accepts pre-constructed DataFrames rather than reading from files,
+        providing a more flexible workflow for data integration.
+
         Args:
-            potis_df (pd.DataFrame): DataFrame with points of interest. Must contain at least "latitude", "longitude", "category" and optionally "vi" and "cluster".
-            centroids_df (pd.DataFrame): DataFrame with cluster centroids. Must contain "latitude" and "longitude".
+            potis_df (pd.DataFrame): DataFrame with points of interest. Must contain at least
+                "latitude", "longitude", "category" and optionally "vi" and "cluster".
+            centroids_df (pd.DataFrame): DataFrame with cluster centroids. Must contain
+                "latitude" and "longitude".
             zones_gdf (GeoDataFrame): GeoDataFrame with vulnerability zones geometry.
 
         Returns:
             self: For method chaining
 
         Raises:
-            ValueError: If required columns are missing.
+            ValueError: If required columns are missing or data is invalid.
         """
         # Validate POTIs DataFrame
         required_poti_columns = ["latitude", "longitude", "category"]
@@ -762,20 +775,33 @@ class VERUS(Logger):
         """
         Run the complete vulnerability assessment workflow.
 
-        This method first updates the POTI DataFrame based on external time window data
-        (if provided) to set the appropriate vulnerability index (vi). Then, it executes
-        the clustering pipeline (using OPTICS to determine centres and initializing KMeans
-        with those centres), computes vulnerability zones, applies smoothing and optionally
-        creates a map visualization.
+        This method executes the full vulnerability assessment pipeline:
+        1. Updates POTI vulnerability indices based on external time window data (if provided)
+        2. Executes the clustering pipeline (OPTICS → KMeans)
+        3. Computes vulnerability zones
+        4. Applies smoothing to improve spatial continuity
+        5. Creates map visualization (if area_boundary_path is provided)
 
         Args:
-            data_source: POTI DataFrame or path to POTI data
-            time_windows: Optional dictionary or DataFrame with time window data
-            centers_input: Optional predefined centers for clustering
-            area_boundary_path: Optional path to boundary GeoJSON for visualization
+            data_source (pd.DataFrame or str, optional): POTI DataFrame or path to POTI data.
+                If None, uses data previously loaded via load().
+            time_windows (dict or pd.DataFrame, optional): Time window data for updating vulnerability indices.
+                If dict, keys should be category names and values should be DataFrames with a "vi" column.
+                If DataFrame, must contain "category" and "vi" columns.
+            centers_input (pd.DataFrame, optional): Predefined centers for clustering.
+                If None, centers are determined by the clustering pipeline.
+            area_boundary_path (str, optional): Path to boundary GeoJSON for visualization.
 
         Returns:
-            dict: Dictionary with results of the vulnerability assessment
+            dict: Dictionary with results of the vulnerability assessment, containing:
+                - "clusters": DataFrame with cluster assignments
+                - "centroids": DataFrame with cluster centers
+                - "map": Interactive map (if area_boundary_path was provided)
+                - "input_data": POTI DataFrame with updated vulnerability indices
+                - "place_name": Name of the analyzed place
+                - "labels", "inertia", "n_iter": Additional clustering information
+                - "vulnerability_zones": GeoDataFrame with vulnerability zones
+                - "error": Error message if an exception occurred
         """
         try:
             # Extract place name from data source if possible
