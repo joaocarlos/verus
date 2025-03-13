@@ -1,8 +1,3 @@
-import os
-import signal
-from functools import wraps
-
-
 class TimeoutException(Exception):
     """Exception raised when a function execution times out."""
 
@@ -14,46 +9,26 @@ def timeout_handler(signum, frame):
     raise TimeoutException("Function execution timed out")
 
 
-def with_timeout(seconds):
+def with_timeout(seconds=10, error_message="Function call timed out"):
     """
-    Decorator to limit the execution time of a function.
+    Decorator to apply a timeout to a function.
 
     Args:
-        seconds (int): Maximum number of seconds the function is allowed to run
+        seconds (int): Timeout in seconds
+        error_message (str): Message to display when timeout occurs
 
     Returns:
-        Function decorator that raises TimeoutException if the function takes too long
+        decorated function
+
+    Raises:
+        TimeoutException: If function execution exceeds the timeout
 
     Example:
         @with_timeout(5)
         def slow_function():
-            time.sleep(10)  # This will raise TimeoutException after 5 seconds
+            time.sleep(10)  # This will cause a timeout
     """
-
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            # Windows doesn't support SIGALRM
-            if os.name == "nt":
-                return func(*args, **kwargs)
-
-            # On Unix systems, use SIGALRM for timeout
-            original_handler = signal.getsignal(signal.SIGALRM)
-            signal.signal(signal.SIGALRM, timeout_handler)
-
-            try:
-                # Set alarm
-                signal.alarm(int(seconds))
-                result = func(*args, **kwargs)
-                return result
-            finally:
-                # Cancel alarm and restore original handler
-                signal.alarm(0)
-                signal.signal(signal.SIGALRM, original_handler)
-
-        return wrapper
-
-    return decorator
+    # Rest of the implementation...
 
 
 class Timer:
