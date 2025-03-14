@@ -1,0 +1,90 @@
+[build-system]
+requires = ["setuptools>=42", "wheel", "setuptools_scm>=6.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "verus"
+dynamic = ["version"]
+description = "A scientific tool to extract and analyze urban spatiotemporal vulnerability."
+readme = "README.md"
+keywords = ["GIS", "Vulnerability", "Assessment", "OpenStreetMap", "Clustering"]
+authors = [
+    {name = "João Carlos N. Bittencourt", email = "joaocarlos@ufrb.edu.br"}
+]
+license = {text = "MIT License"}
+maintainers = [{ name = "LES2 FEUP faculty memebers" }]
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "Topic :: Scientific/Engineering :: GIS",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Topic :: Scientific/Engineering :: Visualization",
+    "Topic :: Scientific/Engineering :: Urban Science",
+    "Topic :: Scientific/Engineering :: Spatial Analysis",
+    "Topic :: Scientific/Engineering :: Clustering",
+    "Topic :: Scientific/Engineering :: Machine Learning",
+]
+dependencies = [
+    "numpy>=1.20.0",
+    "pandas>=1.3.0",
+    "geopandas>=0.10.0",
+    "shapely>=1.8.0",
+    "pyproj>=3.0.0",
+    "osmnx>=1.1.0",
+    "rtree>=1.0.0",
+    "folium>=0.12.0",
+    "matplotlib>=3.5.0",
+    "plotly>=5.3.0",
+    "scikit-learn>=1.0.0",
+    "colorama>=0.4.4",
+    "tqdm>=4.62.0",
+    "requests>=2.26.0",
+    "haversine>=2.3.0",
+    "branca>=0.4.0",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/les2feup/verus"
+"Bug Tracker" = "https://github.com/les2feup/verus/issues"
+"Documentation" = "https://les2feup.github.io/verus/"
+"Code Repository" = "https://github.com/les2feup/verus"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.2.5",
+    "black>=22.1.0",
+    "isort>=5.10.1",
+    "flake8>=4.0.1",
+    "mypy>=0.910",
+    "coverage>=6.2",
+]
+docs = [
+    "sphinx>=4.3.0",
+    "sphinx-rtd-theme>=1.0.0",
+    "nbsphinx>=0.8.8",
+]
+viz = [
+    "seaborn>=0.11.2",
+    "plotly>=5.3.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"verus" = []
+
+[tool.setuptools_scm]
+write_to = "src/verus/_version.py"

@@ -30,3 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 -   Limited support for time windows
 -   Main function can expose more parameters for experimentation
 -   PoI filtering to select really influential points is not yet implemented
+
+### Future Improvements
+
+-   Implement a CLI for easier usage of the framework

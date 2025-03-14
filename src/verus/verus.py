@@ -207,7 +207,7 @@ class VERUS(Logger):
                     "POTI DataFrame doesn't have 'vi' column. Using default vi=1.",
                     level="warning",
                 )
-                self.poti_df["vi"] = 1.0
+                self.poti_df["vi"] = 0.0
 
             # Set default cluster if not present
             if "cluster" not in self.poti_df.columns:
@@ -933,6 +933,7 @@ class VERUS(Logger):
                 init=kmeans_params.get("init", "predefined"),
                 random_state=kmeans_params.get("random_state", 42),
                 verbose=self.verbose,
+                predefined_centers=centers,
             )
             # Only pass what's needed
             kmeans_results = kmeans.run(

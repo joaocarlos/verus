@@ -21,7 +21,11 @@ Components:
 """
 
 # Package metadata
-__version__ = "0.1.0"
+try:
+    from ._version import version as __version__
+except ImportError:
+    __version__ = "0.1.0.dev0"  # Default during development
+
 __author__ = "João Carlos N. Bittencourt"
 __team__ = "Laboratory of Emerging Smart Systems"
 __email__ = "joaocarlos@ufrb.edu.br"
